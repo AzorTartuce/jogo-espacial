@@ -1,11 +1,45 @@
 // Efeitos sonoros sintetizados com Web Audio (sem arquivos externos)
 let ctx = null;
 let muted = false;
+let unlocked = false;
 
 function audio() {
   if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
   if (ctx.state === 'suspended') ctx.resume();
   return ctx;
+}
+
+// iOS Safari só libera o áudio depois de um gesto do usuário, e mesmo assim
+// precisa de um "empurrão" extra (tocar um buffer silencioso) para destravar
+// de vez. Sem isso, sons tocados dentro de setTimeout (acerto, erro, etc.)
+// podem ficar mudos mesmo com a chave de silencioso desligada.
+function unlock() {
+  if (unlocked) return;
+  unlocked = true;
+  try {
+    const ac = audio();
+    const buffer = ac.createBuffer(1, 1, 22050);
+    const src = ac.createBufferSource();
+    src.buffer = buffer;
+    src.connect(ac.destination);
+    src.start(0);
+    if (ac.state === 'suspended') ac.resume();
+  } catch {
+    unlocked = false;
+  }
+}
+
+if (typeof document !== 'undefined') {
+  ['touchend', 'mousedown', 'keydown'].forEach((evt) =>
+    document.addEventListener(evt, unlock, { once: true, passive: true })
+  );
+
+  // O iOS suspende o contexto de áudio ao bloquear a tela ou trocar de app
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && ctx && ctx.state === 'suspended') {
+      ctx.resume();
+    }
+  });
 }
 
 function tone({ freq, end, dur, type = 'square', vol = 0.12, delay = 0 }) {
