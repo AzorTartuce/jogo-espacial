@@ -14,7 +14,7 @@ export default function ModeMenu({ onSelect }) {
         Encontre todos antes que ele encontre os seus!
       </p>
 
-      <div className="mode-buttons">
+      <div className="mode-buttons mode-grid">
         <button className="mode-card" onClick={() => pick('local')}>
           <span className="mode-icon">🖥️</span>
           <span className="mode-title">Mesmo computador</span>
@@ -25,9 +25,17 @@ export default function ModeMenu({ onSelect }) {
 
         <button className="mode-card" onClick={() => pick('online')}>
           <span className="mode-icon">🌐</span>
-          <span className="mode-title">Online com sala</span>
+          <span className="mode-title">Online 1v1</span>
           <span className="mode-desc">
             Crie uma sala e compartilhe o código — cada um no seu dispositivo
+          </span>
+        </button>
+
+        <button className="mode-card" onClick={() => pick('team')}>
+          <span className="mode-icon">👥</span>
+          <span className="mode-title">Online 2v2</span>
+          <span className="mode-desc">
+            Duplas! 4 jogadores, cada um no seu dispositivo — Time A vs Time B
           </span>
         </button>
       </div>

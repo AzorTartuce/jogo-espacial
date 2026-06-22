@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   SIZE,
   FLEET,
@@ -6,8 +6,10 @@ import {
   PLASMA_COST,
   TURN_SECONDS,
 } from '../game/constants.js';
-import { fire, radarScan, plasmaCells } from '../game/logic.js';
+import { fire, radarScan, plasmaCells, rowCol, idx } from '../game/logic.js';
 import { sfx } from '../game/sound.js';
+import { randomEvent, EVENT_INTERVAL } from '../game/events.js';
+import EventBanner from './EventBanner.jsx';
 
 export default function BattleScreen({
   playerName,
@@ -15,19 +17,33 @@ export default function BattleScreen({
   enemyBoard,
   ownBoard,
   energy,
+  gameMode,
+  upgrades = [],
   onAttack,
   onSpendEnergy,
   onTimeout,
+  onUpgradeUsed,
 }) {
+  const timerBase = TURN_SECONDS + (upgrades.includes('timer_boost') ? 10 : 0);
+  const radarRadius = upgrades.includes('radar_xl') ? 2 : 1;
+  const basePlasmaCost = upgrades.includes('plasma_cheap') ? 3 : PLASMA_COST;
+
   const [mode, setMode] = useState('fire'); // fire | radar | plasma
   const [message, setMessage] = useState(`Sua vez, ${playerName}!`);
-  const [board, setBoard] = useState(enemyBoard); // cópia local p/ radar e animação
+  const [board, setBoard] = useState(enemyBoard);
   const [shake, setShake] = useState(false);
-  const [flash, setFlash] = useState(new Set()); // células recém atingidas
+  const [flash, setFlash] = useState(new Set());
   const [locked, setLocked] = useState(false);
-  const [seconds, setSeconds] = useState(TURN_SECONDS);
+  const [seconds, setSeconds] = useState(timerBase);
   const [localEnergy, setLocalEnergy] = useState(energy);
+  const [activeEvent, setActiveEvent] = useState(null);
+  const [solarStorm, setSolarStorm] = useState(false);
   const timedOut = useRef(false);
+  const radarFreeUsedRef = useRef(false);
+
+  const effectiveRadarCost = solarStorm ? RADAR_COST + 2 : RADAR_COST;
+  const effectivePlasmaCost = solarStorm ? basePlasmaCost + 2 : basePlasmaCost;
+  const radarIsFree = upgrades.includes('radar_free');
 
   // Timer do turno
   useEffect(() => {
@@ -50,6 +66,49 @@ export default function BattleScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Timer de eventos (Instabilidade)
+  const applyEvent = useCallback((event) => {
+    switch (event.id) {
+      case 'nebula':
+        sfx.radar();
+        setBoard((b) => b.map((c) => ({ ...c, revealed: false })));
+        break;
+      case 'interference':
+        sfx.miss();
+        setSeconds((s) => Math.max(5, Math.floor(s / 2)));
+        break;
+      case 'vision':
+        sfx.radar();
+        setBoard((b) => {
+          const candidates = b
+            .map((c, i) => i)
+            .filter((i) => !b[i].shot && !b[i].revealed);
+          if (!candidates.length) return b;
+          const target = candidates[Math.floor(Math.random() * candidates.length)];
+          const next = b.slice();
+          next[target] = { ...next[target], revealed: true };
+          return next;
+        });
+        break;
+      case 'solar_storm':
+        sfx.plasma();
+        setSolarStorm(true);
+        setTimeout(() => setSolarStorm(false), 15000);
+        break;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (gameMode !== 'instabilidade') return;
+    const interval = setInterval(() => {
+      if (timedOut.current) return;
+      const event = randomEvent();
+      setActiveEvent(event);
+      applyEvent(event);
+    }, EVENT_INTERVAL * 1000);
+    return () => clearInterval(interval);
+  }, [gameMode, applyEvent]);
+
   function animateHits(indices) {
     setFlash(new Set(indices));
     setShake(true);
@@ -59,24 +118,39 @@ export default function BattleScreen({
   function handleCellClick(index) {
     if (locked || timedOut.current) return;
 
+    if (gameMode === 'classico') {
+      const result = fire(board, index);
+      if (!result) return;
+      sfx.laser();
+      finishAttack(result.board, [index], 1, result.hit ? 1 : 0, result.destroyed, null);
+      return;
+    }
+
     if (mode === 'radar') {
-      if (localEnergy < RADAR_COST) return;
+      const cost = radarIsFree ? 0 : effectiveRadarCost;
+      if (!radarIsFree && localEnergy < effectiveRadarCost) return;
       sfx.radar();
-      setLocalEnergy((e) => e - RADAR_COST);
-      onSpendEnergy(RADAR_COST);
-      setBoard((b) => radarScan(b, index));
+      if (radarIsFree) {
+        if (radarFreeUsedRef.current) return;
+        radarFreeUsedRef.current = true;
+        onUpgradeUsed?.('radar_free');
+      } else {
+        setLocalEnergy((e) => e - cost);
+        onSpendEnergy(cost);
+      }
+      setBoard((b) => radarScan(b, index, radarRadius));
       setMessage('📡 Radar ativado! Sinais revelados na área.');
       setMode('fire');
       return;
     }
 
     if (mode === 'plasma') {
-      if (localEnergy < PLASMA_COST) return;
+      if (localEnergy < effectivePlasmaCost) return;
       const targets = plasmaCells(index).filter((i) => !board[i].shot);
       if (targets.length === 0) return;
       sfx.plasma();
-      setLocalEnergy((e) => e - PLASMA_COST);
-      onSpendEnergy(PLASMA_COST);
+      setLocalEnergy((e) => e - effectivePlasmaCost);
+      onSpendEnergy(effectivePlasmaCost);
 
       let next = board;
       let hits = 0;
@@ -95,16 +169,9 @@ export default function BattleScreen({
 
     // Tiro normal
     const result = fire(board, index);
-    if (!result) return; // célula já atingida
+    if (!result) return;
     sfx.laser();
-    finishAttack(
-      result.board,
-      [index],
-      1,
-      result.hit ? 1 : 0,
-      result.destroyed,
-      null
-    );
+    finishAttack(result.board, [index], 1, result.hit ? 1 : 0, result.destroyed, null);
   }
 
   function finishAttack(nextBoard, indices, shotsFired, hitsMade, destroyed, prefix) {
@@ -118,6 +185,30 @@ export default function BattleScreen({
       if (anyHit) sfx.hit();
       else sfx.miss();
 
+      // Sensor de Anomalia: revela célula adjacente ao errar
+      if (!anyHit && upgrades.includes('anomaly_sensor') && indices.length > 0) {
+        setBoard((b) => {
+          const candidates = new Set();
+          for (const cellIdx of indices) {
+            const [row, col] = rowCol(cellIdx);
+            for (const [dr, dc] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+              const r = row + dr;
+              const c = col + dc;
+              if (r >= 0 && r < SIZE && c >= 0 && c < SIZE) {
+                const i = idx(r, c);
+                if (!b[i].shot && !b[i].revealed) candidates.add(i);
+              }
+            }
+          }
+          if (!candidates.size) return b;
+          const arr = [...candidates];
+          const target = arr[Math.floor(Math.random() * arr.length)];
+          const next = b.slice();
+          next[target] = { ...next[target], revealed: true };
+          return next;
+        });
+      }
+
       let msg;
       if (destroyed) {
         msg = `🎉 Você encontrou: ${destroyed.emoji} ${destroyed.name}!`;
@@ -129,19 +220,11 @@ export default function BattleScreen({
       if (prefix) msg = `${prefix} ${msg}`;
       setMessage(msg);
 
-      onAttack({
-        board: nextBoard,
-        indices,
-        shotsFired,
-        hitsMade,
-        anyHit,
-        destroyed,
-      });
+      onAttack({ board: nextBoard, indices, shotsFired, hitsMade, anyHit, destroyed });
       if (anyHit) {
         setLocked(false);
-        setSeconds(TURN_SECONDS); // acertou: timer reinicia
+        setSeconds(timerBase);
       }
-      // Se errou, o App troca de jogador — a tela some sozinha
     }, 350);
   }
 
@@ -151,15 +234,26 @@ export default function BattleScreen({
     setMode((cur) => (cur === m ? 'fire' : m));
   }
 
-  const timerClass = seconds <= 5 ? 'timer danger' : seconds <= 10 ? 'timer warn' : 'timer';
+  const timerClass =
+    seconds <= 5 ? 'timer danger' : seconds <= 10 ? 'timer warn' : 'timer';
+
+  const showPowers = gameMode !== 'classico';
+  const modeLabel = { classico: '🎯 Clássico', ascensao: '⚡ Ascensão', instabilidade: '🌀 Instabilidade', duelo: '🏅 Duelo' };
 
   return (
     <div className={`screen battle fade-in ${shake ? 'shake' : ''}`}>
+      {activeEvent && (
+        <EventBanner event={activeEvent} onDone={() => setActiveEvent(null)} />
+      )}
+
       <div className="battle-header">
         <h2>
           <span className="highlight">{playerName}</span> ataca o setor de{' '}
           {enemyName}
         </h2>
+        <div className={`mode-badge${solarStorm ? ' mode-badge-storm' : ''}`}>
+          {solarStorm ? '☀️ Tempestade!' : (modeLabel[gameMode] ?? gameMode)}
+        </div>
         <div className={timerClass}>⏱️ {seconds}s</div>
       </div>
 
@@ -198,28 +292,50 @@ export default function BattleScreen({
             })}
           </div>
 
-          <div className="powers">
-            <div className="energy">⚡ {localEnergy}</div>
-            <button
-              className={`power-btn ${mode === 'radar' ? 'active' : ''}`}
-              disabled={localEnergy < RADAR_COST}
-              onClick={() => selectMode('radar', RADAR_COST)}
-            >
-              📡 Radar ({RADAR_COST}⚡)
-            </button>
-            <button
-              className={`power-btn ${mode === 'plasma' ? 'active' : ''}`}
-              disabled={localEnergy < PLASMA_COST}
-              onClick={() => selectMode('plasma', PLASMA_COST)}
-            >
-              ☄️ Plasma ({PLASMA_COST}⚡)
-            </button>
-          </div>
-          {mode !== 'fire' && (
-            <div className="mode-hint">
-              {mode === 'radar'
-                ? 'Clique numa célula para escanear a área 3x3'
-                : 'Clique numa célula para disparar em cruz'}
+          {showPowers && (
+            <>
+              <div className="powers">
+                <div className="energy">⚡ {localEnergy}</div>
+                <button
+                  className={`power-btn ${mode === 'radar' ? 'active' : ''} ${radarIsFree ? 'power-free' : ''}`}
+                  disabled={!radarIsFree && localEnergy < effectiveRadarCost}
+                  onClick={() => selectMode('radar', radarIsFree ? 0 : effectiveRadarCost)}
+                >
+                  📡 Radar {radarIsFree ? '(GRÁTIS)' : `(${effectiveRadarCost}⚡)`}
+                </button>
+                <button
+                  className={`power-btn ${mode === 'plasma' ? 'active' : ''}`}
+                  disabled={localEnergy < effectivePlasmaCost}
+                  onClick={() => selectMode('plasma', effectivePlasmaCost)}
+                >
+                  ☄️ Plasma ({effectivePlasmaCost}⚡)
+                </button>
+              </div>
+              {mode !== 'fire' && (
+                <div className="mode-hint">
+                  {mode === 'radar'
+                    ? `Clique numa célula para escanear a área ${radarRadius === 2 ? '4×4' : '3×3'}`
+                    : 'Clique numa célula para disparar em cruz'}
+                </div>
+              )}
+            </>
+          )}
+
+          {upgrades.length > 0 && (
+            <div className="active-upgrades">
+              {upgrades.map((id) => {
+                const labels = {
+                  timer_boost: '⏱️+10s',
+                  radar_xl: '📡4×4',
+                  plasma_cheap: '☄️3⚡',
+                  radar_free: '🎁Grátis',
+                  anomaly_sensor: '🔭Sensor',
+                  energy_bonus: null,
+                };
+                return labels[id] ? (
+                  <span key={id} className="upgrade-pip">{labels[id]}</span>
+                ) : null;
+              })}
             </div>
           )}
         </div>

@@ -1,26 +1,30 @@
 import { useState, useCallback, useRef } from 'react';
 import { ENERGY_PER_TURN } from '../game/constants.js';
+import { UPGRADE_POOL } from '../game/upgrades.js';
 import { allFound } from '../game/logic.js';
 import { sfx } from '../game/sound.js';
 import Menu from './Menu.jsx';
 import PlacementScreen from './PlacementScreen.jsx';
 import PassScreen from './PassScreen.jsx';
 import BattleScreen from './BattleScreen.jsx';
+import UpgradeScreen from './UpgradeScreen.jsx';
 import GameOver from './GameOver.jsx';
 
 const initialStats = () => ({ shots: 0, hits: 0 });
 
-export default function LocalGame() {
-  // phase: menu | placement | pass | battle | gameover
+export default function LocalGame({ gameMode }) {
+  // phase: menu | placement | pass | battle | upgrade | gameover
   const [phase, setPhase] = useState('menu');
   const [names, setNames] = useState(['Jogador 1', 'Jogador 2']);
   const [boards, setBoards] = useState([null, null]);
   const [energy, setEnergy] = useState([0, 0]);
   const [stats, setStats] = useState([initialStats(), initialStats()]);
-  const [current, setCurrent] = useState(0); // quem está jogando/posicionando
-  const [afterPass, setAfterPass] = useState(null); // { phase, player }
+  const [current, setCurrent] = useState(0);
+  const [afterPass, setAfterPass] = useState(null);
   const [winner, setWinner] = useState(null);
-  const [turnKey, setTurnKey] = useState(0); // reinicia o timer a cada turno
+  const [turnKey, setTurnKey] = useState(0);
+  const [turnsPlayed, setTurnsPlayed] = useState([0, 0]);
+  const [upgrades, setUpgrades] = useState([[], []]);
   const passTimeout = useRef(null);
 
   const goToPass = useCallback((nextPhase, player, delay = 0) => {
@@ -40,19 +44,36 @@ export default function LocalGame() {
     setStats([initialStats(), initialStats()]);
     setWinner(null);
     setCurrent(0);
+    setTurnsPlayed([0, 0]);
+    setUpgrades([[], []]);
     goToPass('placement', 0);
+  }
+
+  function shouldShowUpgrade(player) {
+    return (
+      gameMode === 'duelo' &&
+      turnsPlayed[player] > 0 &&
+      turnsPlayed[player] % 3 === 0 &&
+      upgrades[player].length < UPGRADE_POOL.length
+    );
   }
 
   function confirmPass() {
     const { phase: nextPhase, player } = afterPass;
     setCurrent(player);
     if (nextPhase === 'battle') {
-      setEnergy((e) => {
-        const next = e.slice();
-        next[player] += ENERGY_PER_TURN;
-        return next;
-      });
+      if (gameMode !== 'classico') {
+        setEnergy((e) => {
+          const next = e.slice();
+          next[player] += ENERGY_PER_TURN;
+          return next;
+        });
+      }
       setTurnKey((k) => k + 1);
+      if (shouldShowUpgrade(player)) {
+        setPhase('upgrade');
+        return;
+      }
     }
     setPhase(nextPhase);
   }
@@ -70,7 +91,6 @@ export default function LocalGame() {
     }
   }
 
-  // Aplica o resultado de um tiro (ou rajada) no tabuleiro do oponente
   function applyAttack({ board, shotsFired, hitsMade, anyHit, destroyed }) {
     const enemy = 1 - current;
     const nextBoards = boards.slice();
@@ -91,8 +111,14 @@ export default function LocalGame() {
     }
     if (destroyed) sfx.destroyed();
 
-    // Acertou: continua jogando (a própria tela reinicia o timer).
     if (!anyHit) {
+      if (gameMode === 'duelo') {
+        setTurnsPlayed((t) => {
+          const next = [...t];
+          next[current]++;
+          return next;
+        });
+      }
       goToPass('battle', enemy, 1000);
     }
   }
@@ -106,7 +132,36 @@ export default function LocalGame() {
   }
 
   function handleTimeout() {
+    if (gameMode === 'duelo') {
+      setTurnsPlayed((t) => {
+        const next = [...t];
+        next[current]++;
+        return next;
+      });
+    }
     goToPass('battle', 1 - current, 600);
+  }
+
+  function applyUpgrade(upgradeId) {
+    if (!upgradeId) {
+      setPhase('battle');
+      return;
+    }
+    setUpgrades((u) => u.map((list, i) => (i === current ? [...list, upgradeId] : list)));
+    if (upgradeId === 'energy_bonus') {
+      setEnergy((e) => {
+        const next = [...e];
+        next[current] += 3;
+        return next;
+      });
+    }
+    setPhase('battle');
+  }
+
+  function handleUpgradeUsed(upgradeId) {
+    setUpgrades((u) =>
+      u.map((list, i) => (i === current ? list.filter((id) => id !== upgradeId) : list))
+    );
   }
 
   return (
@@ -116,9 +171,7 @@ export default function LocalGame() {
       {phase === 'pass' && afterPass && (
         <PassScreen
           name={names[afterPass.player]}
-          action={
-            afterPass.phase === 'placement' ? 'esconder sua equipe' : 'atacar'
-          }
+          action={afterPass.phase === 'placement' ? 'esconder sua equipe' : 'atacar'}
           onConfirm={confirmPass}
         />
       )}
@@ -131,6 +184,14 @@ export default function LocalGame() {
         />
       )}
 
+      {phase === 'upgrade' && (
+        <UpgradeScreen
+          playerName={names[current]}
+          pickedUpgrades={upgrades[current]}
+          onPick={applyUpgrade}
+        />
+      )}
+
       {phase === 'battle' && (
         <BattleScreen
           key={`${current}-${turnKey}`}
@@ -139,9 +200,12 @@ export default function LocalGame() {
           enemyBoard={boards[1 - current]}
           ownBoard={boards[current]}
           energy={energy[current]}
+          gameMode={gameMode}
+          upgrades={gameMode === 'duelo' ? upgrades[current] : []}
           onAttack={applyAttack}
           onSpendEnergy={spendEnergy}
           onTimeout={handleTimeout}
+          onUpgradeUsed={handleUpgradeUsed}
         />
       )}
 

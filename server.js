@@ -68,7 +68,7 @@ wss.on('connection', (ws) => {
     if (msg.type === 'join') {
       const code = String(msg.code || '').trim().toUpperCase();
       const room = rooms.get(code);
-      if (!room) {
+      if (!room || room.maxPlayers) {
         send(ws, { type: 'error', message: 'Sala não encontrada. Confira o código.' });
         return;
       }
@@ -86,19 +86,65 @@ wss.on('connection', (ws) => {
       return;
     }
 
+    if (msg.type === 'create-team') {
+      const code = genCode();
+      rooms.set(code, { players: [{ ws, name: cleanName(msg.name) }], maxPlayers: 4 });
+      ws.roomCode = code;
+      ws.playerIndex = 0;
+      send(ws, { type: 'team-created', code, playerIndex: 0, players: [cleanName(msg.name)] });
+      console.log(`Sala 2v2 ${code} criada por ${cleanName(msg.name)}`);
+      return;
+    }
+
+    if (msg.type === 'join-team') {
+      const code = String(msg.code || '').trim().toUpperCase();
+      const room = rooms.get(code);
+      if (!room || !room.maxPlayers) {
+        send(ws, { type: 'error', message: 'Sala não encontrada ou não é 2v2. Confira o código.' });
+        return;
+      }
+      if (room.players.length >= room.maxPlayers) {
+        send(ws, { type: 'error', message: 'Sala cheia (já tem 4 jogadores).' });
+        return;
+      }
+      const name = cleanName(msg.name);
+      const playerIndex = room.players.length;
+      room.players.push({ ws, name });
+      ws.roomCode = code;
+      ws.playerIndex = playerIndex;
+      const playerList = room.players.map((p) => p.name);
+      send(ws, { type: 'team-joined', code, playerIndex, players: playerList });
+      for (let i = 0; i < room.players.length - 1; i++) {
+        send(room.players[i].ws, { type: 'team-player-joined', playerIndex, name, players: playerList });
+      }
+      if (room.players.length === room.maxPlayers) {
+        for (const p of room.players) {
+          send(p.ws, { type: 'team-start', players: playerList });
+        }
+        console.log(`Sala 2v2 ${code} cheia — partida iniciando`);
+      }
+      console.log(`${name} entrou na sala 2v2 ${code} (slot ${playerIndex})`);
+      return;
+    }
+
     if (msg.type === 'relay') {
       const room = rooms.get(ws.roomCode);
       if (!room) return;
-      const other = room.players[1 - ws.playerIndex];
-      if (other) send(other.ws, { type: 'relay', data: msg.data });
+      // Envia para todos os outros jogadores da sala
+      for (const p of room.players) {
+        if (p.ws !== ws) {
+          send(p.ws, { type: 'relay', fromIndex: ws.playerIndex, data: msg.data });
+        }
+      }
     }
   });
 
   ws.on('close', () => {
     const room = rooms.get(ws.roomCode);
     if (!room) return;
-    const other = room.players[1 - ws.playerIndex];
-    if (other) send(other.ws, { type: 'opponent-left' });
+    for (const p of room.players) {
+      if (p.ws !== ws) send(p.ws, { type: 'opponent-left' });
+    }
     rooms.delete(ws.roomCode);
     console.log(`Sala ${ws.roomCode} encerrada`);
   });

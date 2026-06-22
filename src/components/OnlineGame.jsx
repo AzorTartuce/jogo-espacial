@@ -2,14 +2,23 @@ import { useReducer, useRef, useEffect, useState } from 'react';
 import { ENERGY_PER_TURN } from '../game/constants.js';
 import { fire, allFound } from '../game/logic.js';
 import { sfx } from '../game/sound.js';
+import { UPGRADE_POOL } from '../game/upgrades.js';
 import { createConnection } from '../online/connection.js';
 import PlacementScreen from './PlacementScreen.jsx';
 import BattleScreen from './BattleScreen.jsx';
 import DefendScreen from './DefendScreen.jsx';
+import UpgradeScreen from './UpgradeScreen.jsx';
 import GameOver from './GameOver.jsx';
 
+const ONLINE_MODES = [
+  { id: 'classico',      icon: '🎯', title: 'Clássico'      },
+  { id: 'ascensao',      icon: '⚡', title: 'Ascensão'      },
+  { id: 'instabilidade', icon: '🌀', title: 'Instabilidade' },
+  { id: 'duelo',         icon: '🏅', title: 'Duelo'         },
+];
+
 const initialState = {
-  // lobby | hosting | placement | waitBoards | battle | defend | gameover
+  // lobby | hosting | placement | waitBoards | battle | defend | upgrade | gameover
   stage: 'lobby',
   code: '',
   myIndex: 0,
@@ -24,24 +33,35 @@ const initialState = {
   error: '',
   defendMsg: '',
   defendFlash: [],
-  pendingMyTurn: false, // recebi a vez, aguardando animação
-  pendingOppTurn: false, // errei, vou passar a vez
+  pendingMyTurn: false,
+  pendingOppTurn: false,
   rematchMe: false,
   rematchOpp: false,
+  gameMode: 'ascensao',
+  myUpgrades: [],
+  myTurnsPlayed: 0,
 };
 
-// Decide se a batalha pode começar (os dois tabuleiros prontos)
 function maybeStart(s) {
   if (!s.ownBoard || !s.enemyBoard) {
     return { ...s, stage: s.ownBoard ? 'waitBoards' : s.stage };
   }
-  const myTurn = s.myIndex === 0; // quem criou a sala começa
+  const myTurn = s.myIndex === 0;
   return {
     ...s,
     stage: myTurn ? 'battle' : 'defend',
-    energy: myTurn ? s.energy + ENERGY_PER_TURN : s.energy,
+    energy: myTurn && s.gameMode !== 'classico' ? s.energy + ENERGY_PER_TURN : s.energy,
     defendMsg: myTurn ? '' : `${s.oppName} começa atacando...`,
   };
+}
+
+function needsUpgrade(s) {
+  return (
+    s.gameMode === 'duelo' &&
+    s.myTurnsPlayed > 0 &&
+    s.myTurnsPlayed % 3 === 0 &&
+    s.myUpgrades.length < UPGRADE_POOL.length
+  );
 }
 
 function reducer(s, a) {
@@ -85,7 +105,9 @@ function reducer(s, a) {
       if (allFound(a.board)) {
         return { ...ns, winner: 'me', stage: 'gameover' };
       }
-      if (!a.anyHit) return { ...ns, pendingOppTurn: true };
+      if (!a.anyHit) {
+        return { ...ns, myTurnsPlayed: s.myTurnsPlayed + 1, pendingOppTurn: true };
+      }
       return ns;
     }
     case 'hand-over':
@@ -99,6 +121,7 @@ function reducer(s, a) {
     case 'i-timeout':
       return {
         ...s,
+        myTurnsPlayed: s.myTurnsPlayed + 1,
         stage: 'defend',
         defendMsg: `⏱️ Seu tempo acabou! Vez de ${s.oppName}...`,
         defendFlash: [],
@@ -146,17 +169,35 @@ function reducer(s, a) {
         defendMsg: '⏱️ O tempo do oponente acabou! Sua vez...',
         pendingMyTurn: true,
       };
-    case 'take-turn':
+    case 'take-turn': {
+      const stage = needsUpgrade(s) ? 'upgrade' : 'battle';
       return {
         ...s,
         pendingMyTurn: false,
-        stage: 'battle',
-        energy: s.energy + ENERGY_PER_TURN,
+        stage,
+        energy: s.gameMode !== 'classico' ? s.energy + ENERGY_PER_TURN : s.energy,
         defendFlash: [],
       };
+    }
 
     case 'spend':
       return { ...s, energy: s.energy - a.amount };
+
+    case 'upgrade-picked': {
+      if (!a.upgradeId) return { ...s, stage: 'battle' };
+      return {
+        ...s,
+        myUpgrades: [...s.myUpgrades, a.upgradeId],
+        energy: s.energy + (a.upgradeId === 'energy_bonus' ? 3 : 0),
+        stage: 'battle',
+      };
+    }
+
+    case 'use-upgrade':
+      return { ...s, myUpgrades: s.myUpgrades.filter((id) => id !== a.upgradeId) };
+
+    case 'set-mode':
+      return { ...s, gameMode: a.mode };
 
     case 'rematch-me':
     case 'rematch-opp': {
@@ -181,6 +222,8 @@ function reducer(s, a) {
           pendingOppTurn: false,
           rematchMe: false,
           rematchOpp: false,
+          myUpgrades: [],
+          myTurnsPlayed: 0,
         };
       }
       return ns;
@@ -190,12 +233,14 @@ function reducer(s, a) {
       return {
         ...initialState,
         myName: s.myName,
+        gameMode: s.gameMode,
         error: 'O oponente saiu da sala. 😢',
       };
     case 'disconnected':
       return {
         ...initialState,
         myName: s.myName,
+        gameMode: s.gameMode,
         error: s.stage === 'lobby' ? s.error : 'Conexão perdida com o servidor.',
       };
     case 'error':
@@ -210,8 +255,9 @@ export default function OnlineGame({ onExit }) {
   const [codeInput, setCodeInput] = useState('');
   const [connecting, setConnecting] = useState(false);
   const connRef = useRef(null);
+  const gameModeRef = useRef(state.gameMode);
+  useEffect(() => { gameModeRef.current = state.gameMode; }, [state.gameMode]);
 
-  // Fecha a conexão ao sair da tela
   useEffect(() => {
     return () => {
       connRef.current?.close();
@@ -219,21 +265,18 @@ export default function OnlineGame({ onExit }) {
     };
   }, []);
 
-  // Animação/som depois de errar: passa a vez ao oponente
   useEffect(() => {
     if (!state.pendingOppTurn) return;
     const t = setTimeout(() => dispatch({ type: 'hand-over' }), 1100);
     return () => clearTimeout(t);
   }, [state.pendingOppTurn]);
 
-  // Oponente errou: minha vez depois da animação
   useEffect(() => {
     if (!state.pendingMyTurn) return;
     const t = setTimeout(() => dispatch({ type: 'take-turn' }), 1100);
     return () => clearTimeout(t);
   }, [state.pendingMyTurn]);
 
-  // Sons quando um ataque chega no meu setor
   useEffect(() => {
     if (state.defendFlash.length === 0 || !state.ownBoard) return;
     const anyHit = state.defendFlash.some(
@@ -257,13 +300,12 @@ export default function OnlineGame({ onExit }) {
     conn.on('joined', (m) =>
       dispatch({ type: 'joined', code: m.code, oppName: m.oppName })
     );
-    conn.on('opponent-joined', (m) =>
-      dispatch({ type: 'opponent-joined', oppName: m.oppName })
-    );
-    conn.on('error', (m) => dispatch({ type: 'error', message: m.message }));
-    conn.on('opponent-left', () => {
-      dispatch({ type: 'opp-left' });
+    conn.on('opponent-joined', (m) => {
+      dispatch({ type: 'opponent-joined', oppName: m.oppName });
+      conn.relay({ t: 'mode', mode: gameModeRef.current });
     });
+    conn.on('error', (m) => dispatch({ type: 'error', message: m.message }));
+    conn.on('opponent-left', () => dispatch({ type: 'opp-left' }));
     conn.on('closed', () => {
       connRef.current = null;
       dispatch({ type: 'disconnected' });
@@ -274,6 +316,7 @@ export default function OnlineGame({ onExit }) {
       if (d.t === 'attack') dispatch({ type: 'attack-received', indices: d.indices });
       if (d.t === 'pass') dispatch({ type: 'pass-received' });
       if (d.t === 'rematch') dispatch({ type: 'rematch-opp' });
+      if (d.t === 'mode') dispatch({ type: 'set-mode', mode: d.mode });
     });
     await conn.ready;
     connRef.current = conn;
@@ -307,11 +350,7 @@ export default function OnlineGame({ onExit }) {
   function joinRoom() {
     sfx.click();
     withConnection((conn) =>
-      conn.send({
-        type: 'join',
-        code: codeInput,
-        name: state.myName || 'Jogador 2',
-      })
+      conn.send({ type: 'join', code: codeInput, name: state.myName || 'Jogador 2' })
     );
   }
 
@@ -360,7 +399,18 @@ export default function OnlineGame({ onExit }) {
         <div className="lobby-panels">
           <div className="lobby-panel">
             <h3>Criar sala</h3>
-            <p>Você recebe um código para enviar ao seu rival.</p>
+            <p>Você define o modo de jogo para ambos.</p>
+            <div className="online-mode-selector">
+              {ONLINE_MODES.map((m) => (
+                <button
+                  key={m.id}
+                  className={`online-mode-chip ${state.gameMode === m.id ? 'active' : ''}`}
+                  onClick={() => { sfx.click(); dispatch({ type: 'set-mode', mode: m.id }); }}
+                >
+                  {m.icon} {m.title}
+                </button>
+              ))}
+            </div>
             <button className="big-btn" onClick={createRoom} disabled={connecting}>
               ✨ Criar sala
             </button>
@@ -368,6 +418,7 @@ export default function OnlineGame({ onExit }) {
 
           <div className="lobby-panel">
             <h3>Entrar numa sala</h3>
+            <p className="online-join-hint">O modo é definido pelo criador da sala.</p>
             <input
               className="lobby-input code-input"
               placeholder="CÓDIGO"
@@ -425,6 +476,16 @@ export default function OnlineGame({ onExit }) {
     );
   }
 
+  if (stage === 'upgrade') {
+    return (
+      <UpgradeScreen
+        playerName={state.myName || 'Você'}
+        pickedUpgrades={state.myUpgrades}
+        onPick={(upgradeId) => dispatch({ type: 'upgrade-picked', upgradeId })}
+      />
+    );
+  }
+
   if (stage === 'battle') {
     return (
       <BattleScreen
@@ -433,9 +494,12 @@ export default function OnlineGame({ onExit }) {
         enemyBoard={state.enemyBoard}
         ownBoard={state.ownBoard}
         energy={state.energy}
+        gameMode={state.gameMode}
+        upgrades={state.gameMode === 'duelo' ? state.myUpgrades : []}
         onAttack={handleAttack}
         onSpendEnergy={(amount) => dispatch({ type: 'spend', amount })}
         onTimeout={handleTimeout}
+        onUpgradeUsed={(upgradeId) => dispatch({ type: 'use-upgrade', upgradeId })}
       />
     );
   }

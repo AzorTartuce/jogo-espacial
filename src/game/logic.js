@@ -91,12 +91,12 @@ export function allFound(board) {
   return board.every((c) => !c.pieceId || c.shot);
 }
 
-// Revela área 3x3 ao redor do centro (radar)
-export function radarScan(board, center) {
+// Revela área (2*radius+1)² ao redor do centro (radar)
+export function radarScan(board, center, radius = 1) {
   const [row, col] = rowCol(center);
   const next = board.slice();
-  for (let r = row - 1; r <= row + 1; r++) {
-    for (let c = col - 1; c <= col + 1; c++) {
+  for (let r = row - radius; r <= row + radius; r++) {
+    for (let c = col - radius; c <= col + radius; c++) {
       if (r >= 0 && r < SIZE && c >= 0 && c < SIZE) {
         const i = idx(r, c);
         next[i] = { ...next[i], revealed: true };
