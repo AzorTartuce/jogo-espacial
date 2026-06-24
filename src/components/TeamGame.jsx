@@ -127,33 +127,46 @@ function reducer(s, a) {
     case 'attack-received': {
       const { fromPlayer, targetPlayer, indices } = a;
       const ta = s.teamAssignment;
+      const isTimeout = targetPlayer === -1;
+
       let boards = { ...s.boards };
       let hits = 0;
       let destroyed = null;
-      const target = boards[targetPlayer];
-      if (target) {
-        let b = target;
-        for (const i of indices) {
-          const r = fire(b, i);
-          if (r) { b = r.board; if (r.hit) hits++; if (r.destroyed) destroyed = r.destroyed; }
+      if (!isTimeout) {
+        const target = boards[targetPlayer];
+        if (target) {
+          let b = target;
+          for (const i of indices) {
+            const r = fire(b, i);
+            if (r) { b = r.board; if (r.hit) hits++; if (r.destroyed) destroyed = r.destroyed; }
+          }
+          boards = { ...boards, [targetPlayer]: b };
         }
-        boards = { ...boards, [targetPlayer]: b };
       }
 
-      const isMyBoard   = targetPlayer === s.myIndex;
-      const isAllyBoard = targetPlayer === allyOf(s.myIndex, ta);
+      const isMyBoard   = !isTimeout && targetPlayer === s.myIndex;
+      const isAllyBoard = !isTimeout && targetPlayer === allyOf(s.myIndex, ta);
       const isEnemyAtk  = teamOf(fromPlayer, ta) !== teamOf(s.myIndex, ta);
 
       let oppStats = s.oppStats;
-      if (isEnemyAtk) {
+      if (isEnemyAtk && !isTimeout) {
         oppStats = { shots: s.oppStats.shots + indices.length, hits: s.oppStats.hits + hits };
       }
 
       const ca = nextAttacker(fromPlayer, hits > 0);
       let msg = '';
-      if (destroyed) msg = `💥 Encontraram: ${destroyed.emoji} ${destroyed.name}!`;
-      else if (hits > 0) msg = '💥 Acharam alguém!';
-      else if (isEnemyAtk) msg = '🌫️ Erraram! Prepare-se...';
+      if (isTimeout) {
+        const name = s.players[fromPlayer] ?? `Jogador ${fromPlayer + 1}`;
+        msg = isEnemyAtk
+          ? `⏱️ ${name} ficou sem tempo!`
+          : `⏱️ ${name} ficou sem tempo...`;
+      } else if (destroyed) {
+        msg = `💥 Encontraram: ${destroyed.emoji} ${destroyed.name}!`;
+      } else if (hits > 0) {
+        msg = '💥 Acharam alguém!';
+      } else if (isEnemyAtk) {
+        msg = '🌫️ Erraram! Prepare-se...';
+      }
 
       const ns = {
         ...s,
@@ -162,8 +175,8 @@ function reducer(s, a) {
         currentAttacker: ca,
         defendFlash: isMyBoard   ? indices : [],
         allyFlash:   isAllyBoard ? indices : [],
-        defendMsg:   isEnemyAtk  ? msg : s.defendMsg,
-        allyMsg:     isAllyBoard ? msg : s.allyMsg,
+        defendMsg:   isEnemyAtk                        ? msg : s.defendMsg,
+        allyMsg:     (isAllyBoard || (isTimeout && !isEnemyAtk)) ? msg : s.allyMsg,
       };
 
       const myTeam = teamOf(s.myIndex, ta);
