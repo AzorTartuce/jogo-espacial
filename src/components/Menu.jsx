@@ -2,7 +2,14 @@ import { useState } from 'react';
 import { FLEET, RADAR_COST, PLASMA_COST } from '../game/constants.js';
 import { sfx } from '../game/sound.js';
 
-export default function Menu({ onStart }) {
+const MODE_LABELS = {
+  classico:      '🎯 Clássico',
+  ascensao:      '⚡ Ascensão',
+  instabilidade: '🌀 Instabilidade',
+  duelo:         '🏅 Duelo de Escolhas',
+};
+
+export default function Menu({ gameMode, onStart, onChangeMode }) {
   const [name1, setName1] = useState('');
   const [name2, setName2] = useState('');
 
@@ -58,6 +65,13 @@ export default function Menu({ onStart }) {
       <button className="big-btn" onClick={start}>
         🚀 Iniciar Missão
       </button>
+
+      <div className="menu-mode-row">
+        <span className="menu-mode-label">Modo: <strong>{MODE_LABELS[gameMode]}</strong></span>
+        <button className="small-btn" onClick={() => { sfx.click(); onChangeMode(); }}>
+          Trocar variante
+        </button>
+      </div>
     </div>
   );
 }

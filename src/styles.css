@@ -439,6 +439,14 @@ body::after {
   font-size: 1.2rem;
 }
 
+.menu-mode-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.88rem;
+  color: #b9c2e8;
+}
+
 /* ===== Tela de passar o computador ===== */
 .pass {
   justify-content: center;
@@ -1146,6 +1154,42 @@ body::after {
   font-size: 0.82rem;
   color: #6a7098;
   margin-bottom: 8px;
+}
+
+/* ===== 2v2: seleção de times ===== */
+.team-select-layout {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.team-select-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  background: var(--panel);
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  padding: 24px 28px;
+  min-width: 240px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.team-select-panel-a.team-select-mine {
+  border-color: var(--cyan);
+  box-shadow: 0 0 28px rgba(77, 232, 255, 0.25);
+}
+
+.team-select-panel-b.team-select-mine {
+  border-color: var(--pink);
+  box-shadow: 0 0 28px rgba(255, 94, 156, 0.25);
+}
+
+.team-select-hint {
+  font-size: 0.88rem;
+  color: #6a7098;
 }
 
 /* ===== Responsivo (celular) ===== */

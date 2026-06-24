@@ -5,6 +5,7 @@ import OnlineGame from './components/OnlineGame.jsx';
 import TeamGame from './components/TeamGame.jsx';
 import ModeMenu from './components/ModeMenu.jsx';
 import GameModeMenu from './components/GameModeMenu.jsx';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 
 export default function App() {
   const [mode, setMode] = useState(null);     // null | 'local' | 'online'
@@ -36,11 +37,13 @@ export default function App() {
         </div>
       </header>
 
-      {mode === null && <ModeMenu onSelect={setMode} />}
-      {mode === 'local' && gameMode === null && <GameModeMenu onSelect={setGameMode} />}
-      {mode === 'local' && gameMode && <LocalGame gameMode={gameMode} />}
-      {mode === 'online' && <OnlineGame onExit={goToMenu} />}
-      {mode === 'team' && <TeamGame onExit={goToMenu} />}
+      <ErrorBoundary onReset={goToMenu}>
+        {mode === null && <ModeMenu onSelect={setMode} />}
+        {mode === 'local' && gameMode === null && <GameModeMenu onSelect={setGameMode} />}
+        {mode === 'local' && gameMode && <LocalGame gameMode={gameMode} onChangeMode={() => setGameMode(null)} />}
+        {mode === 'online' && <OnlineGame onExit={goToMenu} />}
+        {mode === 'team' && <TeamGame onExit={goToMenu} />}
+      </ErrorBoundary>
     </div>
   );
 }

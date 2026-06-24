@@ -12,7 +12,7 @@ import GameOver from './GameOver.jsx';
 
 const initialStats = () => ({ shots: 0, hits: 0 });
 
-export default function LocalGame({ gameMode }) {
+export default function LocalGame({ gameMode, onChangeMode }) {
   // phase: menu | placement | pass | battle | upgrade | gameover
   const [phase, setPhase] = useState('menu');
   const [names, setNames] = useState(['Jogador 1', 'Jogador 2']);
@@ -166,7 +166,7 @@ export default function LocalGame({ gameMode }) {
 
   return (
     <>
-      {phase === 'menu' && <Menu onStart={startGame} />}
+      {phase === 'menu' && <Menu gameMode={gameMode} onStart={startGame} onChangeMode={onChangeMode} />}
 
       {phase === 'pass' && afterPass && (
         <PassScreen

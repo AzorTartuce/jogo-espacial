@@ -15,7 +15,8 @@ const app = express();
 const distPath = path.join(__dirname, 'dist');
 if (fs.existsSync(distPath)) {
   app.use(express.static(distPath));
-  app.use((req, res) => res.sendFile(path.join(distPath, 'index.html')));
+  app.get('/', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
+  app.use((req, res) => res.status(404).sendFile(path.join(distPath, '404.html')));
 }
 
 const server = http.createServer(app);
@@ -46,7 +47,20 @@ function cleanName(name) {
   return String(name || 'Astronauta').trim().slice(0, 14) || 'Astronauta';
 }
 
+// Heartbeat: detecta conexões zumbi e mantém a conexão viva em proxies/operadoras
+const HEARTBEAT_INTERVAL = 25000;
+setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (!ws.isAlive) { ws.terminate(); return; }
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, HEARTBEAT_INTERVAL);
+
 wss.on('connection', (ws) => {
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
+
   ws.on('message', (raw) => {
     let msg;
     try {

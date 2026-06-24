@@ -9,23 +9,37 @@ import TeamBattleScreen from './TeamBattleScreen.jsx';
 const FLEET_MAP = Object.fromEntries(FLEET.map((p) => [p.id, p]));
 
 // ─── helpers de índice ───────────────────────────────────────────────────────
-const teamOf    = (pi) => (pi < 2 ? 0 : 1);
-const allyOf    = (pi) => (pi % 2 === 0 ? pi + 1 : pi - 1);
-const enemiesOf = (pi) => (pi < 2 ? [2, 3] : [0, 1]);
+// ta = teamAssignment: { [playerIndex]: 0|1 }
+const teamOf = (pi, ta) => (ta ? ta[pi] : pi < 2 ? 0 : 1);
+const allyOf = (pi, ta) => {
+  if (ta) {
+    const myTeam = ta[pi];
+    const found = [0, 1, 2, 3].find((i) => i !== pi && ta[i] === myTeam);
+    return found ?? (pi % 2 === 0 ? pi + 1 : pi - 1);
+  }
+  return pi % 2 === 0 ? pi + 1 : pi - 1;
+};
+const enemiesOf = (pi, ta) => {
+  if (ta) {
+    const myTeam = ta[pi];
+    return [0, 1, 2, 3].filter((i) => ta[i] !== myTeam);
+  }
+  return pi < 2 ? [2, 3] : [0, 1];
+};
 const nextAttacker = (cur, hit) => (hit ? cur : (cur + 1) % 4);
 
 // ─── estado inicial ──────────────────────────────────────────────────────────
 const init = {
-  stage: 'lobby', // lobby | waiting | placement | waitPlacement | battle | allyAttacking | defend | gameover
+  stage: 'lobby', // lobby | waiting | teamSelect | placement | waitPlacement | battle | allyAttacking | defend | gameover
   code: '',
   myIndex: -1,
   myName: '',
-  players: [],   // nomes indexados 0–3
-  boards: {},    // { [0..3]: Cell[] }
+  players: [],         // nomes indexados 0–3
+  boards: {},          // { [0..3]: Cell[] }
   boardCount: 0,
   currentAttacker: 0,
   energy: 0,
-  winner: -1,    // 0 ou 1 (equipe vencedora)
+  winner: -1,          // 0 ou 1 (equipe vencedora)
   error: '',
   defendMsg: '',
   defendFlash: [],
@@ -33,6 +47,9 @@ const init = {
   allyFlash: [],
   myStats:  { shots: 0, hits: 0 },
   oppStats: { shots: 0, hits: 0 },
+  rematchVotes: [false, false, false, false],
+  teamChoices: {},     // { [playerIndex]: 0|1 } — escolhas em andamento
+  teamAssignment: null,// { [playerIndex]: 0|1 } — fixado ao iniciar
 };
 
 function cellsToBoard(cells) {
@@ -41,8 +58,9 @@ function cellsToBoard(cells) {
 
 function stageFor(s, newTurn = true) {
   const ca = s.currentAttacker;
-  if (ca === s.myIndex)             return { ...s, stage: 'battle', energy: newTurn ? s.energy + ENERGY_PER_TURN : s.energy };
-  if (teamOf(ca) === teamOf(s.myIndex)) return { ...s, stage: 'allyAttacking' };
+  const ta = s.teamAssignment;
+  if (ca === s.myIndex) return { ...s, stage: 'battle', energy: newTurn ? s.energy + ENERGY_PER_TURN : s.energy };
+  if (teamOf(ca, ta) === teamOf(s.myIndex, ta)) return { ...s, stage: 'allyAttacking' };
   return { ...s, stage: 'defend' };
 }
 
@@ -61,7 +79,18 @@ function reducer(s, a) {
     case 'team-player-joined':
       return { ...s, players: a.players.slice() };
     case 'team-start':
-      return { ...s, stage: 'placement', players: a.players.slice() };
+      return { ...s, stage: 'teamSelect', players: a.players.slice(), teamChoices: {}, teamAssignment: null };
+
+    case 'pick-team': {
+      const choices = { ...s.teamChoices, [a.playerIndex]: a.team };
+      const vals = Object.values(choices);
+      const allPicked = Object.keys(choices).length === 4;
+      const balanced  = allPicked && vals.filter((t) => t === 0).length === 2 && vals.filter((t) => t === 1).length === 2;
+      if (balanced) {
+        return { ...s, teamChoices: choices, teamAssignment: choices, stage: 'placement' };
+      }
+      return { ...s, teamChoices: choices };
+    }
 
     case 'placed': {
       const boards = { ...s.boards, [s.myIndex]: a.board };
@@ -79,7 +108,7 @@ function reducer(s, a) {
     }
 
     case 'i-attacked': {
-      // atualiza minha cópia do tabuleiro inimigo
+      const ta = s.teamAssignment;
       const boards = a.board ? { ...s.boards, [a.targetPlayer]: a.board } : s.boards;
       const myStats = {
         shots: s.myStats.shots + a.shotsFired,
@@ -87,16 +116,17 @@ function reducer(s, a) {
       };
       const ca = nextAttacker(s.myIndex, a.anyHit);
       const ns = { ...s, boards, myStats, currentAttacker: ca };
-      const [e0, e1] = enemiesOf(s.myIndex);
-      if (ns.boards[e0] && ns.boards[e1] && allFound(ns.boards[e0]) && allFound(ns.boards[e1])) {
+      const enemies = enemiesOf(s.myIndex, ta);
+      if (enemies.every((pi) => ns.boards[pi] && allFound(ns.boards[pi]))) {
         sfx.win();
-        return { ...ns, winner: teamOf(s.myIndex), stage: 'gameover' };
+        return { ...ns, winner: teamOf(s.myIndex, ta), stage: 'gameover' };
       }
       return stageFor(ns, !a.anyHit);
     }
 
     case 'attack-received': {
       const { fromPlayer, targetPlayer, indices } = a;
+      const ta = s.teamAssignment;
       let boards = { ...s.boards };
       let hits = 0;
       let destroyed = null;
@@ -111,8 +141,8 @@ function reducer(s, a) {
       }
 
       const isMyBoard   = targetPlayer === s.myIndex;
-      const isAllyBoard = targetPlayer === allyOf(s.myIndex);
-      const isEnemyAtk  = teamOf(fromPlayer) !== teamOf(s.myIndex);
+      const isAllyBoard = targetPlayer === allyOf(s.myIndex, ta);
+      const isEnemyAtk  = teamOf(fromPlayer, ta) !== teamOf(s.myIndex, ta);
 
       let oppStats = s.oppStats;
       if (isEnemyAtk) {
@@ -132,19 +162,46 @@ function reducer(s, a) {
         currentAttacker: ca,
         defendFlash: isMyBoard   ? indices : [],
         allyFlash:   isAllyBoard ? indices : [],
-        defendMsg:   isEnemyAtk   ? msg : s.defendMsg,
-        allyMsg:     isAllyBoard  ? msg : s.allyMsg,
+        defendMsg:   isEnemyAtk  ? msg : s.defendMsg,
+        allyMsg:     isAllyBoard ? msg : s.allyMsg,
       };
 
-      const myMembers = teamOf(s.myIndex) === 0 ? [0, 1] : [2, 3];
+      const myTeam = teamOf(s.myIndex, ta);
+      const myMembers = [0, 1, 2, 3].filter((pi) => teamOf(pi, ta) === myTeam);
       if (myMembers.every((pi) => ns.boards[pi] && allFound(ns.boards[pi]))) {
-        return { ...ns, winner: teamOf(fromPlayer), stage: 'gameover' };
+        return { ...ns, winner: teamOf(fromPlayer, ta), stage: 'gameover' };
       }
       return stageFor(ns);
     }
 
     case 'spend':
       return { ...s, energy: s.energy - a.amount };
+
+    case 'rematch-vote': {
+      const votes = s.rematchVotes.slice();
+      votes[a.playerIndex] = true;
+      if (votes.every(Boolean)) {
+        return {
+          ...s,
+          stage: 'teamSelect',
+          boards: {},
+          boardCount: 0,
+          currentAttacker: 0,
+          energy: 0,
+          winner: -1,
+          defendMsg: '',
+          defendFlash: [],
+          allyMsg: '',
+          allyFlash: [],
+          myStats:  { shots: 0, hits: 0 },
+          oppStats: { shots: 0, hits: 0 },
+          rematchVotes: [false, false, false, false],
+          teamChoices: {},
+          teamAssignment: null,
+        };
+      }
+      return { ...s, rematchVotes: votes };
+    }
 
     case 'opp-left':
       return { ...init, myName: s.myName, error: 'Um jogador saiu da sala. 😢' };
@@ -188,8 +245,10 @@ export default function TeamGame({ onExit }) {
     conn.on('relay', (m) => {
       const d = m.data || {};
       const from = m.fromIndex ?? -1;
-      if (d.t === 'board')   dispatch({ type: 'board-received',   fromPlayer: from, cells: d.cells });
-      if (d.t === 'attack')  dispatch({ type: 'attack-received',  fromPlayer: from, targetPlayer: d.targetPlayer, indices: d.indices });
+      if (d.t === 'board')      dispatch({ type: 'board-received',  fromPlayer: from, cells: d.cells });
+      if (d.t === 'attack')     dispatch({ type: 'attack-received', fromPlayer: from, targetPlayer: d.targetPlayer, indices: d.indices });
+      if (d.t === 'rematch')    dispatch({ type: 'rematch-vote',    playerIndex: from });
+      if (d.t === 'team-pick')  dispatch({ type: 'pick-team',       playerIndex: d.playerIndex, team: d.team });
     });
     await conn.ready;
     connRef.current = conn;
@@ -207,13 +266,20 @@ export default function TeamGame({ onExit }) {
   function createRoom() { sfx.click(); withConn((c) => c.send({ type: 'create-team', name: state.myName || 'Jogador 1' })); }
   function joinRoom()   { sfx.click(); withConn((c) => c.send({ type: 'join-team',   code: codeInput, name: state.myName || 'Jogador' })); }
 
+  function pickTeam(team) {
+    sfx.click();
+    connRef.current?.relay({ t: 'team-pick', playerIndex: state.myIndex, team });
+    dispatch({ type: 'pick-team', playerIndex: state.myIndex, team });
+  }
+
   function finishPlacement(board) {
     connRef.current?.relay({ t: 'board', cells: board.map((c) => c.pieceId) });
     dispatch({ type: 'placed', board });
   }
 
   function handleAttack({ boardIdx, board, indices, hitsMade, anyHit, destroyed }) {
-    const targetPlayer = enemiesOf(state.myIndex)[boardIdx];
+    const ta = state.teamAssignment;
+    const targetPlayer = enemiesOf(state.myIndex, ta)[boardIdx];
     connRef.current?.relay({ t: 'attack', targetPlayer, indices });
     if (destroyed) sfx.destroyed();
     dispatch({ type: 'i-attacked', targetPlayer, board, shotsFired: indices.length, hitsMade, anyHit });
@@ -224,8 +290,15 @@ export default function TeamGame({ onExit }) {
     dispatch({ type: 'i-attacked', targetPlayer: -1, board: null, shotsFired: 0, hitsMade: 0, anyHit: false });
   }
 
+  function requestRematch() {
+    sfx.click();
+    connRef.current?.relay({ t: 'rematch' });
+    dispatch({ type: 'rematch-vote', playerIndex: state.myIndex });
+  }
+
   // ─── helpers de UI ────────────────────────────────────────────────────────
   const { stage, myIndex, players, boards, code } = state;
+  const ta     = state.teamAssignment;
   const pname  = (pi) => players[pi] ?? `Jogador ${pi + 1}`;
   const pboard = (pi) => boards[pi] ?? null;
 
@@ -237,7 +310,7 @@ export default function TeamGame({ onExit }) {
       <p className="tagline">
         <strong>Online 2v2</strong> — 4 jogadores, cada um no seu dispositivo.
         <br />
-        Entrem em ordem: slots 1–2 viram Time A, slots 3–4 viram Time B.
+        Após todos entrarem, vocês escolhem os times.
       </p>
       {state.error && <div className="error-box">{state.error}</div>}
       <input className="lobby-input" placeholder="Seu nome" maxLength={14}
@@ -245,7 +318,7 @@ export default function TeamGame({ onExit }) {
       <div className="lobby-panels">
         <div className="lobby-panel">
           <h3>Criar sala 2v2</h3>
-          <p>Você é o 1º do Time A. Compartilhe o código com os outros 3.</p>
+          <p>Compartilhe o código com os outros 3 jogadores.</p>
           <button className="big-btn" onClick={createRoom} disabled={connecting}>👥 Criar sala</button>
         </div>
         <div className="lobby-panel">
@@ -284,16 +357,73 @@ export default function TeamGame({ onExit }) {
     </div>
   );
 
+  if (stage === 'teamSelect') {
+    const choices  = state.teamChoices;
+    const myChoice = choices[myIndex];
+    const countA   = Object.values(choices).filter((t) => t === 0).length;
+    const countB   = Object.values(choices).filter((t) => t === 1).length;
+    const allReady = countA === 2 && countB === 2;
+
+    return (
+      <div className="screen menu fade-in">
+        <h2>Escolha seu time</h2>
+        <p className="tagline">Cada time precisa de exatamente 2 jogadores.</p>
+
+        <div className="team-select-layout">
+          {[0, 1].map((team) => {
+            const label   = teamNames[team];
+            const count   = team === 0 ? countA : countB;
+            const isMine  = myChoice === team;
+            const isFull  = count >= 2 && !isMine;
+            const colorKey = team === 0 ? 'a' : 'b';
+
+            return (
+              <div key={team} className={`team-select-panel team-select-panel-${colorKey}${isMine ? ' team-select-mine' : ''}`}>
+                <div className={`team-label-${colorKey}`}>{label} ({count}/2)</div>
+
+                {players.map((name, pi) =>
+                  choices[pi] === team ? (
+                    <div key={pi} className="team-slot team-slot-filled">
+                      {pi === myIndex ? `✓ ${name} (você)` : `✓ ${name}`}
+                    </div>
+                  ) : null
+                )}
+
+                {Array.from({ length: 2 - count }).map((_, i) => (
+                  <div key={i} className="team-slot">Aguardando...</div>
+                ))}
+
+                <button
+                  className="big-btn"
+                  disabled={isMine || isFull}
+                  onClick={() => pickTeam(team)}
+                  style={isMine ? { opacity: 0.55, cursor: 'default' } : {}}
+                >
+                  {isMine ? `✓ Você está aqui` : `Entrar no ${label}`}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+
+        {allReady ? (
+          <p className="waiting-dots">Times prontos! Iniciando...</p>
+        ) : (
+          <p className="team-select-hint">
+            {Object.keys(choices).length}/4 jogadores escolheram
+          </p>
+        )}
+      </div>
+    );
+  }
+
   if (stage === 'placement') {
-    const myTeam = teamOf(myIndex);
+    const myTeam = teamOf(myIndex, ta);
     return (
       <div>
         <div className="team-placement-info">
           <span className={`team-badge team-badge-${myTeam === 0 ? 'a' : 'b'}`}>
             {teamNames[myTeam]}
-          </span>
-          <span className="team-placement-role">
-            — você é o {myIndex % 2 === 0 ? '1º' : '2º'} jogador
           </span>
         </div>
         <PlacementScreen playerName={pname(myIndex)} onDone={finishPlacement} />
@@ -313,17 +443,18 @@ export default function TeamGame({ onExit }) {
   }
 
   if (stage === 'battle') {
-    const [e0, e1] = enemiesOf(myIndex);
+    const [e0, e1] = enemiesOf(myIndex, ta);
+    const ally = allyOf(myIndex, ta);
     return (
       <TeamBattleScreen
         myName={pname(myIndex)}
-        allyName={pname(allyOf(myIndex))}
+        allyName={pname(ally)}
         enemy0Name={pname(e0)}
         enemy1Name={pname(e1)}
         enemy0Board={pboard(e0)}
         enemy1Board={pboard(e1)}
         ownBoard={pboard(myIndex)}
-        allyBoard={pboard(allyOf(myIndex))}
+        allyBoard={pboard(ally)}
         energy={state.energy}
         onAttack={handleAttack}
         onSpendEnergy={(amount) => dispatch({ type: 'spend', amount })}
@@ -333,14 +464,14 @@ export default function TeamGame({ onExit }) {
   }
 
   if (stage === 'allyAttacking') {
-    const ally = allyOf(myIndex);
+    const ally = allyOf(myIndex, ta);
     return (
       <div className="screen battle fade-in">
         <h2><span className="highlight">{pname(ally)}</span> está atacando...</h2>
         <div className="message">{state.allyMsg || 'Seu parceiro está no ataque!'}</div>
         <div className="team-mini-boards">
-          <MiniBoard board={pboard(myIndex)}   label={`${pname(myIndex)} (você)`}     flash={state.allyFlash} />
-          <MiniBoard board={pboard(ally)}       label={`${pname(ally)} (parceiro)`}   flash={[]} />
+          <MiniBoard board={pboard(myIndex)} label={`${pname(myIndex)} (você)`}   flash={state.allyFlash} />
+          <MiniBoard board={pboard(ally)}    label={`${pname(ally)} (parceiro)`}  flash={[]} />
         </div>
         <p className="waiting-dots">Aguardando parceiro atacar</p>
       </div>
@@ -348,15 +479,15 @@ export default function TeamGame({ onExit }) {
   }
 
   if (stage === 'defend') {
-    const ca = state.currentAttacker;
-    const ally = allyOf(myIndex);
-    const attackerTeamName = teamNames[teamOf(ca)];
+    const ca   = state.currentAttacker;
+    const ally = allyOf(myIndex, ta);
+    const attackerTeamName = teamNames[teamOf(ca, ta)];
     return (
       <div className="screen battle fade-in">
         <h2>{attackerTeamName} — <span className="highlight">{pname(ca)}</span> ataca!</h2>
         <div className="message">{state.defendMsg || 'Segure firme!'}</div>
         <div className="team-mini-boards">
-          <MiniBoard board={pboard(myIndex)} label={`${pname(myIndex)} (você)`} flash={state.defendFlash} />
+          <MiniBoard board={pboard(myIndex)} label={`${pname(myIndex)} (você)`}  flash={state.defendFlash} />
           <MiniBoard board={pboard(ally)}    label={`${pname(ally)} (parceiro)`} flash={state.allyFlash} />
         </div>
         <p className="waiting-dots">Aguardando ataque inimigo</p>
@@ -365,9 +496,11 @@ export default function TeamGame({ onExit }) {
   }
 
   if (stage === 'gameover') {
-    const myTeam  = teamOf(myIndex);
-    const won     = state.winner === myTeam;
-    const winName = teamNames[state.winner];
+    const myTeam   = teamOf(myIndex, ta);
+    const won      = state.winner === myTeam;
+    const winName  = teamNames[state.winner];
+    const myVoted  = state.rematchVotes[myIndex];
+    const voteCount = state.rematchVotes.filter(Boolean).length;
     return (
       <div className="screen gameover fade-in">
         <div className="trophy">{won ? '🏆' : '💫'}</div>
@@ -386,7 +519,14 @@ export default function TeamGame({ onExit }) {
             <div>📊 {state.oppStats.shots > 0 ? Math.round((state.oppStats.hits / state.oppStats.shots) * 100) : 0}%</div>
           </div>
         </div>
-        <button className="big-btn" onClick={onExit}>← Voltar ao Menu</button>
+        {!myVoted ? (
+          <button className="big-btn" onClick={requestRematch}>🔄 Jogar de novo</button>
+        ) : (
+          <p className="waiting-dots rematch-note">
+            Aguardando todos aceitarem ({voteCount}/4)
+          </p>
+        )}
+        <button className="small-btn" onClick={onExit}>← Voltar ao Menu</button>
       </div>
     );
   }

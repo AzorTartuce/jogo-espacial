@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#07071a" />
+    <title>404 — Resgate Espacial</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+
+      body {
+        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        background: #07071a;
+        color: #e8ecff;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 20px;
+        padding: 24px;
+        overflow: hidden;
+      }
+
+      body::before {
+        content: '';
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background-image:
+          radial-gradient(2px 2px at 20% 30%, #fff, transparent),
+          radial-gradient(1px 1px at 50% 10%, #fff, transparent),
+          radial-gradient(2px 2px at 80% 60%, #cfe4ff, transparent),
+          radial-gradient(1px 1px at 10% 80%, #fff, transparent),
+          radial-gradient(1px 1px at 65% 85%, #ffd6f2, transparent),
+          radial-gradient(2px 2px at 35% 55%, #fff, transparent),
+          radial-gradient(1px 1px at 90% 20%, #c4f7ff, transparent),
+          radial-gradient(1px 1px at 45% 95%, #fff, transparent);
+        animation: twinkle 4s ease-in-out infinite alternate;
+      }
+
+      @keyframes twinkle {
+        from { opacity: 0.5; }
+        to   { opacity: 1; }
+      }
+
+      .content {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 20px;
+        text-align: center;
+      }
+
+      .icon {
+        font-size: 5rem;
+        animation: float 2.4s ease-in-out infinite;
+      }
+
+      @keyframes float {
+        0%, 100% { transform: translateY(0); }
+        50%       { transform: translateY(-14px); }
+      }
+
+      .code {
+        font-size: 5rem;
+        font-weight: 900;
+        background: linear-gradient(90deg, #4de8ff, #b16dff, #ff5e9c);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        letter-spacing: 4px;
+        line-height: 1;
+      }
+
+      h1 {
+        font-size: 1.4rem;
+        font-weight: 700;
+        color: #e8ecff;
+      }
+
+      p {
+        font-size: 0.95rem;
+        color: #b9c2e8;
+        max-width: 320px;
+        line-height: 1.6;
+      }
+
+      a {
+        display: inline-block;
+        margin-top: 8px;
+        font-size: 1.1rem;
+        font-weight: 700;
+        padding: 14px 36px;
+        border-radius: 14px;
+        text-decoration: none;
+        color: #061018;
+        background: linear-gradient(90deg, #4de8ff, #5dffa8);
+        box-shadow: 0 0 24px rgba(77, 232, 255, 0.35);
+        transition: transform 0.15s, box-shadow 0.15s;
+      }
+
+      a:hover {
+        transform: translateY(-2px) scale(1.03);
+        box-shadow: 0 0 36px rgba(77, 232, 255, 0.55);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="content">
+      <div class="icon">🛸</div>
+      <div class="code">404</div>
+      <h1>Setor não encontrado</h1>
+      <p>O astronauta se perdeu no espaço e não conseguiu achar essa página.</p>
+      <a href="/">← Voltar ao jogo</a>
+    </div>
+  </body>
+</html>
