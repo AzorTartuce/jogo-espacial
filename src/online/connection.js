@@ -1,8 +1,17 @@
-// Cliente WebSocket: conecta no mesmo host que serviu a página
-// (em dev, o Vite faz proxy de /ws para o servidor de salas).
+const RENDER_WSS_URL = 'wss://resgate-espacial.onrender.com/ws';
+
+// Em Capacitor (app Android/iOS) location.protocol é 'capacitor:',
+// então conecta direto no servidor Render em vez de usar o host relativo.
 export function createConnection() {
-  const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
-  const ws = new WebSocket(proto + location.host + '/ws');
+  const isCapacitor = location.protocol === 'capacitor:';
+  let wsUrl;
+  if (isCapacitor) {
+    wsUrl = RENDER_WSS_URL;
+  } else {
+    const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+    wsUrl = proto + location.host + '/ws';
+  }
+  const ws = new WebSocket(wsUrl);
   const listeners = new Map();
 
   ws.onmessage = (e) => {

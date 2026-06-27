@@ -25,6 +25,13 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 // code -> { players: [{ ws, name }] }
 const rooms = new Map();
 
+// Fila de espera da partida rápida (matchmaking): sockets aguardando oponente
+let quickQueue = [];
+
+function leaveQuickQueue(ws) {
+  quickQueue = quickQueue.filter((w) => w !== ws);
+}
+
 // Sem letras/números ambíguos (O/0, I/1)
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
@@ -141,6 +148,41 @@ wss.on('connection', (ws) => {
       return;
     }
 
+    if (msg.type === 'quick-match') {
+      // Já está na fila? ignora pedidos duplicados.
+      if (quickQueue.includes(ws)) return;
+      // Limpa sockets que fecharam enquanto esperavam.
+      quickQueue = quickQueue.filter((w) => w.readyState === w.OPEN);
+
+      const partner = quickQueue.shift();
+      if (partner && partner !== ws) {
+        // Encontrou par: cria uma sala 1v1 e emparelha os dois.
+        const code = genCode();
+        const p0 = { ws: partner, name: partner.qmName || 'Astronauta' };
+        const p1 = { ws, name: cleanName(msg.name) };
+        rooms.set(code, { players: [p0, p1] });
+        partner.roomCode = code;
+        partner.playerIndex = 0;
+        ws.roomCode = code;
+        ws.playerIndex = 1;
+        send(partner, { type: 'match-found', code, playerIndex: 0, oppName: p1.name });
+        send(ws, { type: 'match-found', code, playerIndex: 1, oppName: p0.name });
+        console.log(`Partida rápida ${code}: ${p0.name} vs ${p1.name}`);
+      } else {
+        // Ninguém esperando: entra na fila.
+        ws.qmName = cleanName(msg.name);
+        quickQueue.push(ws);
+        send(ws, { type: 'searching' });
+        console.log(`${ws.qmName} entrou na fila de partida rápida`);
+      }
+      return;
+    }
+
+    if (msg.type === 'cancel-match') {
+      leaveQuickQueue(ws);
+      return;
+    }
+
     if (msg.type === 'relay') {
       const room = rooms.get(ws.roomCode);
       if (!room) return;
@@ -154,6 +196,7 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
+    leaveQuickQueue(ws);
     const room = rooms.get(ws.roomCode);
     if (!room) return;
     for (const p of room.players) {

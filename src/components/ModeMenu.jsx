@@ -23,6 +23,14 @@ export default function ModeMenu({ onSelect }) {
           </span>
         </button>
 
+        <button className="mode-card" onClick={() => pick('quickmatch')}>
+          <span className="mode-icon">🎲</span>
+          <span className="mode-title">Partida rápida</span>
+          <span className="mode-desc">
+            Entre na fila e jogue contra um oponente aleatório que também está procurando
+          </span>
+        </button>
+
         <button className="mode-card" onClick={() => pick('online')}>
           <span className="mode-icon">🌐</span>
           <span className="mode-title">Online 1v1</span>

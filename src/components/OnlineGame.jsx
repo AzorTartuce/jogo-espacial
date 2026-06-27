@@ -18,7 +18,7 @@ const ONLINE_MODES = [
 ];
 
 const initialState = {
-  // lobby | hosting | placement | waitBoards | battle | defend | upgrade | gameover
+  // lobby | hosting | searching | placement | waitBoards | battle | defend | upgrade | gameover
   stage: 'lobby',
   code: '',
   myIndex: 0,
@@ -81,6 +81,20 @@ function reducer(s, a) {
       };
     case 'opponent-joined':
       return { ...s, stage: 'placement', oppName: a.oppName };
+
+    case 'searching':
+      return { ...s, stage: 'searching', error: '' };
+    case 'match-found':
+      return {
+        ...s,
+        stage: 'placement',
+        code: a.code,
+        myIndex: a.playerIndex,
+        oppName: a.oppName,
+        error: '',
+      };
+    case 'cancel-search':
+      return { ...s, stage: 'lobby' };
 
     case 'placed':
       return maybeStart({ ...s, ownBoard: a.board });
@@ -250,7 +264,7 @@ function reducer(s, a) {
   }
 }
 
-export default function OnlineGame({ onExit }) {
+export default function OnlineGame({ onExit, quickMatch = false }) {
   const [state, dispatch] = useReducer(reducer, initialState);
   const [codeInput, setCodeInput] = useState('');
   const [connecting, setConnecting] = useState(false);
@@ -304,6 +318,12 @@ export default function OnlineGame({ onExit }) {
       dispatch({ type: 'opponent-joined', oppName: m.oppName });
       conn.relay({ t: 'mode', mode: gameModeRef.current });
     });
+    conn.on('searching', () => dispatch({ type: 'searching' }));
+    conn.on('match-found', (m) => {
+      dispatch({ type: 'match-found', code: m.code, playerIndex: m.playerIndex, oppName: m.oppName });
+      // Quem entrou primeiro na fila (índice 0) define o modo para os dois.
+      if (m.playerIndex === 0) conn.relay({ t: 'mode', mode: gameModeRef.current });
+    });
     conn.on('error', (m) => dispatch({ type: 'error', message: m.message }));
     conn.on('opponent-left', () => dispatch({ type: 'opp-left' }));
     conn.on('closed', () => {
@@ -354,6 +374,19 @@ export default function OnlineGame({ onExit }) {
     );
   }
 
+  function findMatch() {
+    sfx.click();
+    withConnection((conn) =>
+      conn.send({ type: 'quick-match', name: state.myName || 'Astronauta', mode: state.gameMode })
+    );
+  }
+
+  function cancelSearch() {
+    sfx.click();
+    connRef.current?.send({ type: 'cancel-match' });
+    dispatch({ type: 'cancel-search' });
+  }
+
   function finishPlacement(board) {
     connRef.current?.relay({ t: 'board', cells: board.map((c) => c.pieceId) });
     dispatch({ type: 'placed', board });
@@ -376,6 +409,51 @@ export default function OnlineGame({ onExit }) {
   }
 
   const { stage } = state;
+
+  if (stage === 'lobby' && quickMatch) {
+    return (
+      <div className="screen menu fade-in">
+        <p className="tagline">
+          Entre na fila e jogue contra um oponente aleatório
+          <br />
+          que também está procurando partida agora.
+        </p>
+
+        {state.error && <div className="error-box">{state.error}</div>}
+
+        <input
+          className="lobby-input"
+          placeholder="Seu nome"
+          maxLength={14}
+          value={state.myName}
+          onChange={(e) => dispatch({ type: 'set-name', name: e.target.value })}
+        />
+
+        <div className="lobby-panels">
+          <div className="lobby-panel">
+            <h3>Escolha o modo</h3>
+            <div className="online-mode-selector">
+              {ONLINE_MODES.map((m) => (
+                <button
+                  key={m.id}
+                  className={`online-mode-chip ${state.gameMode === m.id ? 'active' : ''}`}
+                  onClick={() => { sfx.click(); dispatch({ type: 'set-mode', mode: m.id }); }}
+                >
+                  {m.icon} {m.title}
+                </button>
+              ))}
+            </div>
+            <p className="online-join-hint">
+              Se alguém já estiver esperando, vale o modo de quem entrou na fila primeiro.
+            </p>
+            <button className="big-btn" onClick={findMatch} disabled={connecting}>
+              🎲 Procurar partida
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (stage === 'lobby') {
     return (
@@ -451,6 +529,19 @@ export default function OnlineGame({ onExit }) {
           <br />e entrar com esse código.
         </p>
         <p className="waiting-dots">Aguardando oponente</p>
+      </div>
+    );
+  }
+
+  if (stage === 'searching') {
+    return (
+      <div className="screen pass fade-in">
+        <div className="pass-icon">🛰️</div>
+        <h2>Procurando oponente</h2>
+        <p className="waiting-dots">Conectando você a outro jogador na fila</p>
+        <button className="small-btn" onClick={cancelSearch}>
+          Cancelar busca
+        </button>
       </div>
     );
   }

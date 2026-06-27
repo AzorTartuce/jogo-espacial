@@ -971,6 +971,7 @@ body::after {
   border: 2px solid rgba(255, 255, 255, 0.08);
   background: rgba(20, 22, 50, 0.5);
   cursor: pointer;
+  touch-action: manipulation;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 

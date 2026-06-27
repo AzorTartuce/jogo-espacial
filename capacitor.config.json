@@ -1,0 +1,17 @@
+{
+  "appId": "br.com.resgateeespacial",
+  "appName": "Resgate Espacial",
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#07071a"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1500,
+      "backgroundColor": "#07071a",
+      "androidSplashResourceName": "splash",
+      "showSpinner": false
+    }
+  }
+}
