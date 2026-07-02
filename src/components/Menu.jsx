@@ -1,36 +1,38 @@
 import { useState } from 'react';
 import { FLEET, RADAR_COST, PLASMA_COST } from '../game/constants.js';
 import { sfx } from '../game/sound.js';
+import { useT } from '../i18n/index.jsx';
 
-const MODE_LABELS = {
-  classico:      '🎯 Clássico',
-  ascensao:      '⚡ Ascensão',
-  instabilidade: '🌀 Instabilidade',
-  duelo:         '🏅 Duelo de Escolhas',
+const MODE_ICONS = {
+  classico: '🎯',
+  ascensao: '⚡',
+  instabilidade: '🌀',
+  duelo: '🏅',
 };
 
 export default function Menu({ gameMode, onStart, onChangeMode }) {
+  const t = useT();
   const [name1, setName1] = useState('');
   const [name2, setName2] = useState('');
 
   function start() {
     sfx.click();
-    onStart([name1.trim() || 'Jogador 1', name2.trim() || 'Jogador 2']);
+    onStart([name1.trim() || t('menu.defaultP1'), name2.trim() || t('menu.defaultP2')]);
   }
 
   return (
     <div className="screen menu fade-in">
       <p className="tagline">
-        A equipe de astronautas do seu rival está perdida no espaço.
+        {t('tagline.rescue1')}
         <br />
-        Encontre todos antes que ele encontre os seus!
+        {t('tagline.rescue2')}
       </p>
 
       <div className="menu-fleet">
         {FLEET.map((p) => (
           <div key={p.id} className="menu-fleet-item">
             <span className="fleet-emoji">{p.emoji}</span>
-            <span>{p.name}</span>
+            <span>{t(`fleet.${p.id}`)}</span>
             <span className="fleet-size">
               {Array.from({ length: p.size }, () => '■').join('')}
             </span>
@@ -39,23 +41,23 @@ export default function Menu({ gameMode, onStart, onChangeMode }) {
       </div>
 
       <div className="menu-rules">
-        <div>🎯 Acertou? Joga de novo!</div>
-        <div>⚡ Ganhe energia a cada turno</div>
-        <div>📡 Radar ({RADAR_COST}⚡): revela uma área 3x3</div>
-        <div>☄️ Plasma ({PLASMA_COST}⚡): atinge 5 células em cruz</div>
-        <div>⏱️ 30 segundos por turno — pense rápido!</div>
+        <div>{t('menu.ruleHit')}</div>
+        <div>{t('menu.ruleEnergy')}</div>
+        <div>{t('menu.ruleRadar', { cost: RADAR_COST })}</div>
+        <div>{t('menu.rulePlasma', { cost: PLASMA_COST })}</div>
+        <div>{t('menu.ruleTimer')}</div>
       </div>
 
       <div className="menu-names">
         <input
-          placeholder="Nome do Jogador 1"
+          placeholder={t('menu.player1ph')}
           value={name1}
           maxLength={14}
           onChange={(e) => setName1(e.target.value)}
         />
-        <span className="vs">VS</span>
+        <span className="vs">{t('menu.vs')}</span>
         <input
-          placeholder="Nome do Jogador 2"
+          placeholder={t('menu.player2ph')}
           value={name2}
           maxLength={14}
           onChange={(e) => setName2(e.target.value)}
@@ -63,13 +65,16 @@ export default function Menu({ gameMode, onStart, onChangeMode }) {
       </div>
 
       <button className="big-btn" onClick={start}>
-        🚀 Iniciar Missão
+        {t('menu.start')}
       </button>
 
       <div className="menu-mode-row">
-        <span className="menu-mode-label">Modo: <strong>{MODE_LABELS[gameMode]}</strong></span>
+        <span className="menu-mode-label">
+          {t('menu.modeLabel')}{' '}
+          <strong>{MODE_ICONS[gameMode]} {t(`gameMode.${gameMode}.title`)}</strong>
+        </span>
         <button className="small-btn" onClick={() => { sfx.click(); onChangeMode(); }}>
-          Trocar variante
+          {t('menu.changeVariant')}
         </button>
       </div>
     </div>

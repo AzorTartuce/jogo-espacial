@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { SIZE, FLEET } from '../game/constants.js';
+import { useT } from '../i18n/index.jsx';
 
 // Tela de quem está esperando: vê o próprio setor sendo atacado em tempo real
 export default function DefendScreen({ oppName, ownBoard, message, flash }) {
+  const t = useT();
   const [shake, setShake] = useState(false);
   const flashSet = new Set(flash);
 
@@ -16,7 +18,7 @@ export default function DefendScreen({ oppName, ownBoard, message, flash }) {
   return (
     <div className={`screen battle fade-in ${shake ? 'shake' : ''}`}>
       <h2>
-        <span className="highlight">{oppName}</span> está vasculhando seu setor...
+        <span className="highlight">{oppName}</span> {t('defend.searching')}
       </h2>
       <div className="message">{message}</div>
 
@@ -46,7 +48,7 @@ export default function DefendScreen({ oppName, ownBoard, message, flash }) {
         })}
       </div>
 
-      <p className="waiting-dots">Aguardando o ataque</p>
+      <p className="waiting-dots">{t('defend.waiting')}</p>
     </div>
   );
 }

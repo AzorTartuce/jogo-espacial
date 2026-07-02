@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { SIZE, FLEET, RADAR_COST, PLASMA_COST, TURN_SECONDS } from '../game/constants.js';
 import { fire, radarScan, plasmaCells } from '../game/logic.js';
 import { sfx } from '../game/sound.js';
+import { useT } from '../i18n/index.jsx';
 
 export default function TeamBattleScreen({
   myName,
@@ -17,10 +18,11 @@ export default function TeamBattleScreen({
   onSpendEnergy,
   onTimeout,
 }) {
+  const t = useT();
   const [activeTarget, setActiveTarget] = useState(0); // 0 = enemy0, 1 = enemy1
   const [mode, setMode] = useState('fire');
   const [boards, setBoards] = useState([enemy0Board, enemy1Board]);
-  const [message, setMessage] = useState(`Sua vez, ${myName}!`);
+  const [message, setMessage] = useState(() => t('battle.yourTurn', { name: myName }));
   const [shake, setShake] = useState(false);
   const [flash, setFlash] = useState({ board: -1, cells: new Set() });
   const [locked, setLocked] = useState(false);
@@ -35,7 +37,7 @@ export default function TeamBattleScreen({
           clearInterval(interval);
           if (!timedOut.current) {
             timedOut.current = true;
-            setMessage('⏱️ Tempo esgotado!');
+            setMessage(t('battle.timeUp'));
             sfx.miss();
             onTimeout();
           }
@@ -69,7 +71,7 @@ export default function TeamBattleScreen({
         next[boardIdx] = radarScan(b[boardIdx], index);
         return next;
       });
-      setMessage('📡 Radar ativado! Sinais revelados na área.');
+      setMessage(t('battle.radarOn'));
       setMode('fire');
       return;
     }
@@ -88,7 +90,7 @@ export default function TeamBattleScreen({
         const r = fire(next, t);
         if (r) { next = r.board; if (r.hit) hits++; if (r.destroyed) destroyed = r.destroyed; }
       }
-      finishAttack(boardIdx, next, targets, hits, destroyed, '☄️ Rajada de plasma!');
+      finishAttack(boardIdx, next, targets, hits, destroyed, t('battle.plasmaBurst'));
       return;
     }
 
@@ -110,9 +112,9 @@ export default function TeamBattleScreen({
       else sfx.miss();
 
       let msg;
-      if (destroyed) msg = `🎉 Você encontrou: ${destroyed.emoji} ${destroyed.name}!`;
-      else if (anyHit) msg = '💥 Sinal de vida detectado! Continue!';
-      else msg = '🌫️ Nada por aqui... passando a vez.';
+      if (destroyed) msg = t('battle.found', { emoji: destroyed.emoji, name: t(`fleet.${destroyed.id}`) });
+      else if (anyHit) msg = t('battle.hitMsg');
+      else msg = t('battle.missMsg');
       if (prefix) msg = `${prefix} ${msg}`;
       setMessage(msg);
 
@@ -203,14 +205,14 @@ export default function TeamBattleScreen({
     <div className={`screen battle fade-in ${shake ? 'shake' : ''}`}>
       <div className="battle-header">
         <h2>
-          <span className="highlight">{myName}</span> ataca o time inimigo
+          <span className="highlight">{myName}</span> {t('team.battleAttacksEnemyTeam')}
         </h2>
-        <div className="mode-badge">👥 2v2</div>
+        <div className="mode-badge">{t('team.badge2v2')}</div>
         <div className={timerClass}>⏱️ {seconds}s</div>
       </div>
 
       <div className="message">{message}</div>
-      <p className="team-hint">Clique no setor para selecionar o alvo</p>
+      <p className="team-hint">{t('team.attackSelectTarget')}</p>
 
       <div className="team-enemy-boards">
         {renderEnemyBoard(0)}
@@ -224,25 +226,25 @@ export default function TeamBattleScreen({
           disabled={localEnergy < RADAR_COST}
           onClick={() => selectMode('radar', RADAR_COST)}
         >
-          📡 Radar ({RADAR_COST}⚡)
+          {t('battle.radarBtn')} ({RADAR_COST}⚡)
         </button>
         <button
           className={`power-btn ${mode === 'plasma' ? 'active' : ''}`}
           disabled={localEnergy < PLASMA_COST}
           onClick={() => selectMode('plasma', PLASMA_COST)}
         >
-          ☄️ Plasma ({PLASMA_COST}⚡)
+          {t('battle.plasmaBtn')} ({PLASMA_COST}⚡)
         </button>
       </div>
       {mode !== 'fire' && (
         <div className="mode-hint">
-          Selecione o setor alvo e clique numa célula
+          {t('team.selectTargetCell')}
         </div>
       )}
 
       <div className="team-mini-boards">
-        {renderMiniBoard(ownBoard, `${myName} (você)`)}
-        {renderMiniBoard(allyBoard, `${allyName} (parceiro)`)}
+        {renderMiniBoard(ownBoard, `${myName} (${t('team.you')})`)}
+        {renderMiniBoard(allyBoard, `${allyName} (${t('team.partner')})`)}
       </div>
     </div>
   );

@@ -9,8 +9,10 @@ import {
   placedPieceIds,
 } from '../game/logic.js';
 import { sfx } from '../game/sound.js';
+import { useT } from '../i18n/index.jsx';
 
 export default function PlacementScreen({ playerName, onDone }) {
+  const t = useT();
   const [board, setBoard] = useState(emptyBoard);
   const [selected, setSelected] = useState(FLEET[0].id);
   const [horizontal, setHorizontal] = useState(true);
@@ -64,7 +66,7 @@ export default function PlacementScreen({ playerName, onDone }) {
   return (
     <div className="screen placement fade-in">
       <h2>
-        <span className="highlight">{playerName}</span>, esconda sua equipe!
+        <span className="highlight">{playerName}</span>, {t('placement.hide')}
       </h2>
 
       <div className="placement-layout">
@@ -84,7 +86,7 @@ export default function PlacementScreen({ playerName, onDone }) {
                 disabled={isPlaced}
               >
                 <span className="fleet-emoji">{p.emoji}</span>
-                <span className="fleet-name">{p.name}</span>
+                <span className="fleet-name">{t(`fleet.${p.id}`)}</span>
                 <span className="fleet-size">
                   {Array.from({ length: p.size }, () => '■').join('')}
                 </span>
@@ -95,10 +97,12 @@ export default function PlacementScreen({ playerName, onDone }) {
 
           <div className="placement-actions">
             <button className="small-btn" onClick={() => setHorizontal((h) => !h)}>
-              🔄 Girar ({horizontal ? 'horizontal' : 'vertical'}) — tecla R
+              {t('placement.rotate', {
+                orient: horizontal ? t('placement.horizontal') : t('placement.vertical'),
+              })}
             </button>
             <button className="small-btn" onClick={randomize}>
-              🎲 Aleatório
+              {t('placement.random')}
             </button>
           </div>
         </div>
@@ -139,7 +143,7 @@ export default function PlacementScreen({ playerName, onDone }) {
           onDone(board);
         }}
       >
-        {allPlaced ? '✅ Equipe escondida!' : 'Posicione todas as peças'}
+        {allPlaced ? t('placement.done') : t('placement.placeAll')}
       </button>
     </div>
   );

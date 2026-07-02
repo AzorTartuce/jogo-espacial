@@ -1,16 +1,18 @@
 import { useState, useEffect } from 'react';
-import { toggleMute } from './game/sound.js';
+import { useT } from './i18n/index.jsx';
 import LocalGame from './components/LocalGame.jsx';
 import OnlineGame from './components/OnlineGame.jsx';
 import TeamGame from './components/TeamGame.jsx';
 import ModeMenu from './components/ModeMenu.jsx';
 import GameModeMenu from './components/GameModeMenu.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
+import SettingsPanel from './components/SettingsPanel.jsx';
 
 export default function App() {
+  const t = useT();
   const [mode, setMode] = useState(null);     // null | 'local' | 'online'
   const [gameMode, setGameMode] = useState(null); // null | 'classico' | 'ascensao'
-  const [isMuted, setIsMuted] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   function goToMenu() {
     setMode(null);
@@ -21,8 +23,10 @@ export default function App() {
     if (location.protocol !== 'capacitor:') return;
     let cleanup;
     import('@capacitor/app').then(({ App: CapApp }) => {
-      const handle = CapApp.addListener('backButton', ({ canGoBack }) => {
-        if (mode === null) {
+      const handle = CapApp.addListener('backButton', () => {
+        if (showSettings) {
+          setShowSettings(false);
+        } else if (mode === null) {
           CapApp.exitApp();
         } else {
           goToMenu();
@@ -31,27 +35,30 @@ export default function App() {
       cleanup = () => handle.then((h) => h.remove());
     });
     return () => cleanup?.();
-  }, [mode]);
+  }, [mode, showSettings]);
 
   return (
     <div className="app">
       <header className="topbar">
-        <h1 className="logo">🚀 Resgate Espacial</h1>
+        <h1 className="logo">{t('app.title')}</h1>
         <div className="topbar-actions">
           {mode && (
             <button className="mute-btn" onClick={goToMenu}>
-              ← Menu
+              {t('nav.menu')}
             </button>
           )}
           <button
             className="mute-btn"
-            onClick={() => setIsMuted(toggleMute())}
-            title="Som"
+            onClick={() => setShowSettings(true)}
+            title={t('settings.title')}
+            aria-label={t('settings.title')}
           >
-            {isMuted ? '🔇' : '🔊'}
+            ⚙️
           </button>
         </div>
       </header>
+
+      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
 
       <ErrorBoundary onReset={goToMenu}>
         {mode === null && <ModeMenu onSelect={setMode} />}

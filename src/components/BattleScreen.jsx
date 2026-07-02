@@ -9,6 +9,7 @@ import {
 import { fire, radarScan, plasmaCells, rowCol, idx } from '../game/logic.js';
 import { sfx } from '../game/sound.js';
 import { randomEvent, EVENT_INTERVAL } from '../game/events.js';
+import { useT } from '../i18n/index.jsx';
 import EventBanner from './EventBanner.jsx';
 
 export default function BattleScreen({
@@ -24,12 +25,13 @@ export default function BattleScreen({
   onTimeout,
   onUpgradeUsed,
 }) {
+  const t = useT();
   const timerBase = TURN_SECONDS + (upgrades.includes('timer_boost') ? 10 : 0);
   const radarRadius = upgrades.includes('radar_xl') ? 2 : 1;
   const basePlasmaCost = upgrades.includes('plasma_cheap') ? 3 : PLASMA_COST;
 
   const [mode, setMode] = useState('fire'); // fire | radar | plasma
-  const [message, setMessage] = useState(`Sua vez, ${playerName}!`);
+  const [message, setMessage] = useState(() => t('battle.yourTurn', { name: playerName }));
   const [board, setBoard] = useState(enemyBoard);
   const [shake, setShake] = useState(false);
   const [flash, setFlash] = useState(new Set());
@@ -53,7 +55,7 @@ export default function BattleScreen({
           clearInterval(interval);
           if (!timedOut.current) {
             timedOut.current = true;
-            setMessage('⏱️ Tempo esgotado!');
+            setMessage(t('battle.timeUp'));
             sfx.miss();
             onTimeout();
           }
@@ -139,7 +141,7 @@ export default function BattleScreen({
         onSpendEnergy(cost);
       }
       setBoard((b) => radarScan(b, index, radarRadius));
-      setMessage('📡 Radar ativado! Sinais revelados na área.');
+      setMessage(t('battle.radarOn'));
       setMode('fire');
       return;
     }
@@ -163,7 +165,7 @@ export default function BattleScreen({
           if (result.destroyed) destroyed = result.destroyed;
         }
       }
-      finishAttack(next, targets, targets.length, hits, destroyed, '☄️ Rajada de plasma!');
+      finishAttack(next, targets, targets.length, hits, destroyed, t('battle.plasmaBurst'));
       return;
     }
 
@@ -211,11 +213,11 @@ export default function BattleScreen({
 
       let msg;
       if (destroyed) {
-        msg = `🎉 Você encontrou: ${destroyed.emoji} ${destroyed.name}!`;
+        msg = t('battle.found', { emoji: destroyed.emoji, name: t(`fleet.${destroyed.id}`) });
       } else if (anyHit) {
-        msg = '💥 Sinal de vida detectado! Continue!';
+        msg = t('battle.hitMsg');
       } else {
-        msg = '🌫️ Nada por aqui... passando a vez.';
+        msg = t('battle.missMsg');
       }
       if (prefix) msg = `${prefix} ${msg}`;
       setMessage(msg);
@@ -238,7 +240,9 @@ export default function BattleScreen({
     seconds <= 5 ? 'timer danger' : seconds <= 10 ? 'timer warn' : 'timer';
 
   const showPowers = gameMode !== 'classico';
-  const modeLabel = { classico: '🎯 Clássico', ascensao: '⚡ Ascensão', instabilidade: '🌀 Instabilidade', duelo: '🏅 Duelo' };
+  const modeIcons = { classico: '🎯', ascensao: '⚡', instabilidade: '🌀', duelo: '🏅' };
+  const modeTitle = gameMode === 'duelo' ? t('gameMode.duelo.short') : t(`gameMode.${gameMode}.title`);
+  const modeLabelText = `${modeIcons[gameMode] ?? ''} ${modeTitle}`.trim();
 
   return (
     <div className={`screen battle fade-in ${shake ? 'shake' : ''}`}>
@@ -248,11 +252,11 @@ export default function BattleScreen({
 
       <div className="battle-header">
         <h2>
-          <span className="highlight">{playerName}</span> ataca o setor de{' '}
+          <span className="highlight">{playerName}</span> {t('battle.attacksSectorOf')}{' '}
           {enemyName}
         </h2>
         <div className={`mode-badge${solarStorm ? ' mode-badge-storm' : ''}`}>
-          {solarStorm ? '☀️ Tempestade!' : (modeLabel[gameMode] ?? gameMode)}
+          {solarStorm ? t('battle.storm') : modeLabelText}
         </div>
         <div className={timerClass}>⏱️ {seconds}s</div>
       </div>
@@ -301,21 +305,21 @@ export default function BattleScreen({
                   disabled={!radarIsFree && localEnergy < effectiveRadarCost}
                   onClick={() => selectMode('radar', radarIsFree ? 0 : effectiveRadarCost)}
                 >
-                  📡 Radar {radarIsFree ? '(GRÁTIS)' : `(${effectiveRadarCost}⚡)`}
+                  {t('battle.radarBtn')} {radarIsFree ? t('battle.free') : `(${effectiveRadarCost}⚡)`}
                 </button>
                 <button
                   className={`power-btn ${mode === 'plasma' ? 'active' : ''}`}
                   disabled={localEnergy < effectivePlasmaCost}
                   onClick={() => selectMode('plasma', effectivePlasmaCost)}
                 >
-                  ☄️ Plasma ({effectivePlasmaCost}⚡)
+                  {t('battle.plasmaBtn')} ({effectivePlasmaCost}⚡)
                 </button>
               </div>
               {mode !== 'fire' && (
                 <div className="mode-hint">
                   {mode === 'radar'
-                    ? `Clique numa célula para escanear a área ${radarRadius === 2 ? '4×4' : '3×3'}`
-                    : 'Clique numa célula para disparar em cruz'}
+                    ? t(radarRadius === 2 ? 'battle.radarHint4' : 'battle.radarHint3')
+                    : t('battle.plasmaHint')}
                 </div>
               )}
             </>
@@ -328,8 +332,8 @@ export default function BattleScreen({
                   timer_boost: '⏱️+10s',
                   radar_xl: '📡4×4',
                   plasma_cheap: '☄️3⚡',
-                  radar_free: '🎁Grátis',
-                  anomaly_sensor: '🔭Sensor',
+                  radar_free: `🎁${t('battle.pipFree')}`,
+                  anomaly_sensor: `🔭${t('battle.pipSensor')}`,
                   energy_bonus: null,
                 };
                 return labels[id] ? (
@@ -341,7 +345,7 @@ export default function BattleScreen({
         </div>
 
         <div className="own-side">
-          <div className="own-title">Sua equipe</div>
+          <div className="own-title">{t('battle.yourTeam')}</div>
           <div className="grid own-grid" style={{ '--size': SIZE }}>
             {ownBoard.map((cell, i) => {
               const piece = cell.pieceId

@@ -1,6 +1,12 @@
 // Efeitos sonoros sintetizados com Web Audio (sem arquivos externos)
 let ctx = null;
-let muted = false;
+let muted = (() => {
+  try {
+    return localStorage.getItem('muted') === '1';
+  } catch {
+    return false;
+  }
+})();
 let unlocked = false;
 
 function audio() {
@@ -63,7 +69,20 @@ function tone({ freq, end, dur, type = 'square', vol = 0.12, delay = 0 }) {
 }
 
 export function toggleMute() {
-  muted = !muted;
+  setMuted(!muted);
+  return muted;
+}
+
+export function setMuted(value) {
+  muted = !!value;
+  try {
+    localStorage.setItem('muted', muted ? '1' : '0');
+  } catch {
+    // localStorage indisponível: mantém só em memória
+  }
+}
+
+export function isMuted() {
   return muted;
 }
 

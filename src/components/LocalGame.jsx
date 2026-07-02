@@ -171,7 +171,7 @@ export default function LocalGame({ gameMode, onChangeMode }) {
       {phase === 'pass' && afterPass && (
         <PassScreen
           name={names[afterPass.player]}
-          action={afterPass.phase === 'placement' ? 'esconder sua equipe' : 'atacar'}
+          action={afterPass.phase}
           onConfirm={confirmPass}
         />
       )}

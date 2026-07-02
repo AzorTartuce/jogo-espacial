@@ -4,6 +4,7 @@ import { fire, allFound } from '../game/logic.js';
 import { sfx } from '../game/sound.js';
 import { UPGRADE_POOL } from '../game/upgrades.js';
 import { createConnection } from '../online/connection.js';
+import { useT, tr } from '../i18n/index.jsx';
 import PlacementScreen from './PlacementScreen.jsx';
 import BattleScreen from './BattleScreen.jsx';
 import DefendScreen from './DefendScreen.jsx';
@@ -11,10 +12,10 @@ import UpgradeScreen from './UpgradeScreen.jsx';
 import GameOver from './GameOver.jsx';
 
 const ONLINE_MODES = [
-  { id: 'classico',      icon: '🎯', title: 'Clássico'      },
-  { id: 'ascensao',      icon: '⚡', title: 'Ascensão'      },
-  { id: 'instabilidade', icon: '🌀', title: 'Instabilidade' },
-  { id: 'duelo',         icon: '🏅', title: 'Duelo'         },
+  { id: 'classico',      icon: '🎯' },
+  { id: 'ascensao',      icon: '⚡' },
+  { id: 'instabilidade', icon: '🌀' },
+  { id: 'duelo',         icon: '🏅' },
 ];
 
 const initialState = {
@@ -51,7 +52,7 @@ function maybeStart(s) {
     ...s,
     stage: myTurn ? 'battle' : 'defend',
     energy: myTurn && s.gameMode !== 'classico' ? s.energy + ENERGY_PER_TURN : s.energy,
-    defendMsg: myTurn ? '' : `${s.oppName} começa atacando...`,
+    defendMsg: myTurn ? '' : tr('online.oppStartsAttack', { name: s.oppName }),
   };
 }
 
@@ -129,7 +130,7 @@ function reducer(s, a) {
         ...s,
         pendingOppTurn: false,
         stage: 'defend',
-        defendMsg: `Vez de ${s.oppName}. Segure firme!`,
+        defendMsg: tr('online.oppTurnHold', { name: s.oppName }),
         defendFlash: [],
       };
     case 'i-timeout':
@@ -137,7 +138,7 @@ function reducer(s, a) {
         ...s,
         myTurnsPlayed: s.myTurnsPlayed + 1,
         stage: 'defend',
-        defendMsg: `⏱️ Seu tempo acabou! Vez de ${s.oppName}...`,
+        defendMsg: tr('online.yourTimeUp', { name: s.oppName }),
         defendFlash: [],
       };
 
@@ -155,11 +156,11 @@ function reducer(s, a) {
       }
       let msg;
       if (destroyed) {
-        msg = `💥 Encontraram: ${destroyed.emoji} ${destroyed.name}!`;
+        msg = tr('online.foundYour', { emoji: destroyed.emoji, name: tr(`fleet.${destroyed.id}`) });
       } else if (hits > 0) {
-        msg = '💥 Acharam alguém da sua equipe!';
+        msg = tr('online.hitYour');
       } else {
-        msg = '🌫️ Erraram! Prepare seu ataque...';
+        msg = tr('online.missYour');
       }
       const ns = {
         ...s,
@@ -180,7 +181,7 @@ function reducer(s, a) {
     case 'pass-received':
       return {
         ...s,
-        defendMsg: '⏱️ O tempo do oponente acabou! Sua vez...',
+        defendMsg: tr('online.oppTimeUp'),
         pendingMyTurn: true,
       };
     case 'take-turn': {
@@ -248,14 +249,14 @@ function reducer(s, a) {
         ...initialState,
         myName: s.myName,
         gameMode: s.gameMode,
-        error: 'O oponente saiu da sala. 😢',
+        error: tr('online.errorOppLeft'),
       };
     case 'disconnected':
       return {
         ...initialState,
         myName: s.myName,
         gameMode: s.gameMode,
-        error: s.stage === 'lobby' ? s.error : 'Conexão perdida com o servidor.',
+        error: s.stage === 'lobby' ? s.error : tr('online.connLost'),
       };
     case 'error':
       return { ...s, error: a.message };
@@ -265,6 +266,7 @@ function reducer(s, a) {
 }
 
 export default function OnlineGame({ onExit, quickMatch = false }) {
+  const t = useT();
   const [state, dispatch] = useReducer(reducer, initialState);
   const [codeInput, setCodeInput] = useState('');
   const [connecting, setConnecting] = useState(false);
@@ -350,34 +352,33 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
       const conn = await getConnection();
       fn(conn);
     } catch {
-      dispatch({
-        type: 'error',
-        message:
-          'Não consegui conectar ao servidor de salas. Ele está rodando? (npm run server)',
-      });
+      dispatch({ type: 'error', message: t('online.connectFail') });
     } finally {
       setConnecting(false);
     }
   }
 
+  const modeTitle = (id) =>
+    id === 'duelo' ? t('gameMode.duelo.short') : t(`gameMode.${id}.title`);
+
   function createRoom() {
     sfx.click();
     withConnection((conn) =>
-      conn.send({ type: 'create', name: state.myName || 'Jogador 1' })
+      conn.send({ type: 'create', name: state.myName || t('menu.defaultP1') })
     );
   }
 
   function joinRoom() {
     sfx.click();
     withConnection((conn) =>
-      conn.send({ type: 'join', code: codeInput, name: state.myName || 'Jogador 2' })
+      conn.send({ type: 'join', code: codeInput, name: state.myName || t('menu.defaultP2') })
     );
   }
 
   function findMatch() {
     sfx.click();
     withConnection((conn) =>
-      conn.send({ type: 'quick-match', name: state.myName || 'Astronauta', mode: state.gameMode })
+      conn.send({ type: 'quick-match', name: state.myName || t('online.defaultAstronaut'), mode: state.gameMode })
     );
   }
 
@@ -414,16 +415,16 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
     return (
       <div className="screen menu fade-in">
         <p className="tagline">
-          Entre na fila e jogue contra um oponente aleatório
+          {t('online.quickTagline1')}
           <br />
-          que também está procurando partida agora.
+          {t('online.quickTagline2')}
         </p>
 
         {state.error && <div className="error-box">{state.error}</div>}
 
         <input
           className="lobby-input"
-          placeholder="Seu nome"
+          placeholder={t('online.yourName')}
           maxLength={14}
           value={state.myName}
           onChange={(e) => dispatch({ type: 'set-name', name: e.target.value })}
@@ -431,7 +432,7 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
 
         <div className="lobby-panels">
           <div className="lobby-panel">
-            <h3>Escolha o modo</h3>
+            <h3>{t('online.chooseMode')}</h3>
             <div className="online-mode-selector">
               {ONLINE_MODES.map((m) => (
                 <button
@@ -439,15 +440,15 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
                   className={`online-mode-chip ${state.gameMode === m.id ? 'active' : ''}`}
                   onClick={() => { sfx.click(); dispatch({ type: 'set-mode', mode: m.id }); }}
                 >
-                  {m.icon} {m.title}
+                  {m.icon} {modeTitle(m.id)}
                 </button>
               ))}
             </div>
             <p className="online-join-hint">
-              Se alguém já estiver esperando, vale o modo de quem entrou na fila primeiro.
+              {t('online.quickHint')}
             </p>
             <button className="big-btn" onClick={findMatch} disabled={connecting}>
-              🎲 Procurar partida
+              {t('online.searchBtn')}
             </button>
           </div>
         </div>
@@ -459,16 +460,16 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
     return (
       <div className="screen menu fade-in">
         <p className="tagline">
-          Crie uma sala e compartilhe o código de 4 letras,
+          {t('online.createTagline1')}
           <br />
-          ou entre numa sala existente.
+          {t('online.createTagline2')}
         </p>
 
         {state.error && <div className="error-box">{state.error}</div>}
 
         <input
           className="lobby-input"
-          placeholder="Seu nome"
+          placeholder={t('online.yourName')}
           maxLength={14}
           value={state.myName}
           onChange={(e) => dispatch({ type: 'set-name', name: e.target.value })}
@@ -476,8 +477,8 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
 
         <div className="lobby-panels">
           <div className="lobby-panel">
-            <h3>Criar sala</h3>
-            <p>Você define o modo de jogo para ambos.</p>
+            <h3>{t('online.createRoomH')}</h3>
+            <p>{t('online.createRoomP')}</p>
             <div className="online-mode-selector">
               {ONLINE_MODES.map((m) => (
                 <button
@@ -485,21 +486,21 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
                   className={`online-mode-chip ${state.gameMode === m.id ? 'active' : ''}`}
                   onClick={() => { sfx.click(); dispatch({ type: 'set-mode', mode: m.id }); }}
                 >
-                  {m.icon} {m.title}
+                  {m.icon} {modeTitle(m.id)}
                 </button>
               ))}
             </div>
             <button className="big-btn" onClick={createRoom} disabled={connecting}>
-              ✨ Criar sala
+              {t('online.createBtn')}
             </button>
           </div>
 
           <div className="lobby-panel">
-            <h3>Entrar numa sala</h3>
-            <p className="online-join-hint">O modo é definido pelo criador da sala.</p>
+            <h3>{t('online.joinH')}</h3>
+            <p className="online-join-hint">{t('online.joinHint')}</p>
             <input
               className="lobby-input code-input"
-              placeholder="CÓDIGO"
+              placeholder={t('online.codePh')}
               maxLength={4}
               value={codeInput}
               onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
@@ -509,7 +510,7 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
               onClick={joinRoom}
               disabled={connecting || codeInput.trim().length !== 4}
             >
-              🛸 Entrar
+              {t('online.joinBtn')}
             </button>
           </div>
         </div>
@@ -521,14 +522,14 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
     return (
       <div className="screen pass fade-in">
         <div className="pass-icon">📡</div>
-        <h2>Sala criada!</h2>
+        <h2>{t('online.roomCreated')}</h2>
         <div className="room-code">{state.code}</div>
         <p>
-          Peça para o outro jogador abrir{' '}
-          <span className="highlight">{location.host}</span> no dispositivo dele
-          <br />e entrar com esse código.
+          {t('online.shareInstr1')}{' '}
+          <span className="highlight">{location.host}</span>{' '}
+          {t('online.shareInstr2')}
         </p>
-        <p className="waiting-dots">Aguardando oponente</p>
+        <p className="waiting-dots">{t('online.waitingOpp')}</p>
       </div>
     );
   }
@@ -537,10 +538,10 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
     return (
       <div className="screen pass fade-in">
         <div className="pass-icon">🛰️</div>
-        <h2>Procurando oponente</h2>
-        <p className="waiting-dots">Conectando você a outro jogador na fila</p>
+        <h2>{t('online.searchingH')}</h2>
+        <p className="waiting-dots">{t('online.searchingP')}</p>
         <button className="small-btn" onClick={cancelSearch}>
-          Cancelar busca
+          {t('online.cancelSearch')}
         </button>
       </div>
     );
@@ -549,7 +550,7 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
   if (stage === 'placement') {
     return (
       <PlacementScreen
-        playerName={state.myName || 'Você'}
+        playerName={state.myName || t('online.you')}
         onDone={finishPlacement}
       />
     );
@@ -559,9 +560,9 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
     return (
       <div className="screen pass fade-in">
         <div className="pass-icon">🧑‍🚀</div>
-        <h2>Equipe escondida!</h2>
+        <h2>{t('online.teamHidden')}</h2>
         <p className="waiting-dots">
-          Aguardando {state.oppName || 'o oponente'} esconder a equipe
+          {t('online.waitOppHide', { name: state.oppName || t('online.theOpponent') })}
         </p>
       </div>
     );
@@ -570,7 +571,7 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
   if (stage === 'upgrade') {
     return (
       <UpgradeScreen
-        playerName={state.myName || 'Você'}
+        playerName={state.myName || t('online.you')}
         pickedUpgrades={state.myUpgrades}
         onPick={(upgradeId) => dispatch({ type: 'upgrade-picked', upgradeId })}
       />
@@ -580,7 +581,7 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
   if (stage === 'battle') {
     return (
       <BattleScreen
-        playerName={state.myName || 'Você'}
+        playerName={state.myName || t('online.you')}
         enemyName={state.oppName}
         enemyBoard={state.enemyBoard}
         ownBoard={state.ownBoard}
@@ -610,19 +611,19 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
     return (
       <>
         <GameOver
-          winnerName={state.winner === 'me' ? state.myName || 'Você' : state.oppName}
+          winnerName={state.winner === 'me' ? state.myName || t('online.you') : state.oppName}
           stats={[state.myStats, state.oppStats]}
-          names={[state.myName || 'Você', state.oppName]}
+          names={[state.myName || t('online.you'), state.oppName]}
           onRestart={requestRematch}
         />
         {state.rematchMe && (
           <p className="waiting-dots rematch-note">
-            Aguardando {state.oppName} aceitar a revanche
+            {t('online.rematchWaiting', { name: state.oppName })}
           </p>
         )}
         {state.rematchOpp && !state.rematchMe && (
           <p className="rematch-note highlight">
-            {state.oppName} quer revanche! Clique em "Jogar de novo"
+            {t('online.rematchWants', { name: state.oppName })}
           </p>
         )}
       </>

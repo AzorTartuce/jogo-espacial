@@ -1,4 +1,5 @@
 import { Component } from 'react';
+import { tr } from '../i18n/index.jsx';
 
 export default class ErrorBoundary extends Component {
   constructor(props) {
@@ -19,9 +20,9 @@ export default class ErrorBoundary extends Component {
       return (
         <div className="screen gameover fade-in" style={{ justifyContent: 'center', minHeight: '70vh' }}>
           <div style={{ fontSize: '4rem' }}>💫</div>
-          <h2>Algo deu errado</h2>
+          <h2>{tr('error.crashed')}</h2>
           <p style={{ color: '#b9c2e8', textAlign: 'center', maxWidth: 340 }}>
-            Ocorreu um erro inesperado. Volte ao menu e tente novamente.
+            {tr('error.crashedDesc')}
           </p>
           <button
             className="big-btn"
@@ -30,7 +31,7 @@ export default class ErrorBoundary extends Component {
               this.props.onReset?.();
             }}
           >
-            ← Voltar ao Menu
+            {tr('nav.backToMenu')}
           </button>
         </div>
       );

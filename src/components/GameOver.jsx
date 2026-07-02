@@ -1,11 +1,13 @@
 import { sfx } from '../game/sound.js';
+import { useT } from '../i18n/index.jsx';
 
 export default function GameOver({ winnerName, stats, names, onRestart }) {
+  const t = useT();
   return (
     <div className="screen gameover fade-in">
       <div className="trophy">🏆</div>
       <h2>
-        <span className="highlight">{winnerName}</span> resgatou toda a equipe!
+        <span className="highlight">{winnerName}</span> {t('gameover.rescued')}
       </h2>
 
       <div className="stats">
@@ -17,9 +19,9 @@ export default function GameOver({ winnerName, stats, names, onRestart }) {
           return (
             <div key={i} className="stat-card">
               <div className="stat-name">{n}</div>
-              <div>🎯 {stats[i].shots} disparos</div>
-              <div>💥 {stats[i].hits} acertos</div>
-              <div>📊 {acc}% de precisão</div>
+              <div>{t('gameover.shots', { n: stats[i].shots })}</div>
+              <div>{t('gameover.hits', { n: stats[i].hits })}</div>
+              <div>{t('gameover.accuracy', { n: acc })}</div>
             </div>
           );
         })}
@@ -32,7 +34,7 @@ export default function GameOver({ winnerName, stats, names, onRestart }) {
           onRestart();
         }}
       >
-        🔄 Jogar de novo
+        {t('gameover.playAgain')}
       </button>
     </div>
   );

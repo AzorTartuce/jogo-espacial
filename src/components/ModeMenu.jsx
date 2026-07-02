@@ -1,6 +1,8 @@
 import { sfx } from '../game/sound.js';
+import { useT } from '../i18n/index.jsx';
 
 export default function ModeMenu({ onSelect }) {
+  const t = useT();
   function pick(mode) {
     sfx.click();
     onSelect(mode);
@@ -9,42 +11,34 @@ export default function ModeMenu({ onSelect }) {
   return (
     <div className="screen menu fade-in">
       <p className="tagline">
-        A equipe de astronautas do seu rival está perdida no espaço.
+        {t('tagline.rescue1')}
         <br />
-        Encontre todos antes que ele encontre os seus!
+        {t('tagline.rescue2')}
       </p>
 
       <div className="mode-buttons mode-grid">
         <button className="mode-card" onClick={() => pick('local')}>
           <span className="mode-icon">🖥️</span>
-          <span className="mode-title">Mesmo computador</span>
-          <span className="mode-desc">
-            Dois jogadores se revezam no mesmo dispositivo
-          </span>
+          <span className="mode-title">{t('modeMenu.local.title')}</span>
+          <span className="mode-desc">{t('modeMenu.local.desc')}</span>
         </button>
 
         <button className="mode-card" onClick={() => pick('quickmatch')}>
           <span className="mode-icon">🎲</span>
-          <span className="mode-title">Partida rápida</span>
-          <span className="mode-desc">
-            Entre na fila e jogue contra um oponente aleatório que também está procurando
-          </span>
+          <span className="mode-title">{t('modeMenu.quick.title')}</span>
+          <span className="mode-desc">{t('modeMenu.quick.desc')}</span>
         </button>
 
         <button className="mode-card" onClick={() => pick('online')}>
           <span className="mode-icon">🌐</span>
-          <span className="mode-title">Online 1v1</span>
-          <span className="mode-desc">
-            Crie uma sala e compartilhe o código — cada um no seu dispositivo
-          </span>
+          <span className="mode-title">{t('modeMenu.online.title')}</span>
+          <span className="mode-desc">{t('modeMenu.online.desc')}</span>
         </button>
 
         <button className="mode-card" onClick={() => pick('team')}>
           <span className="mode-icon">👥</span>
-          <span className="mode-title">Online 2v2</span>
-          <span className="mode-desc">
-            Duplas! 4 jogadores, cada um no seu dispositivo — Time A vs Time B
-          </span>
+          <span className="mode-title">{t('modeMenu.team.title')}</span>
+          <span className="mode-desc">{t('modeMenu.team.desc')}</span>
         </button>
       </div>
     </div>
