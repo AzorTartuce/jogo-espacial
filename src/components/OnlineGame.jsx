@@ -1,8 +1,8 @@
-import { useReducer, useRef, useEffect, useState } from 'react';
+import { useReducer, useRef, useEffect, useState, useCallback } from 'react';
 import { ENERGY_PER_TURN } from '../game/constants.js';
-import { fire, allFound } from '../game/logic.js';
+import { fire, allFound, emptyBoard } from '../game/logic.js';
 import { sfx } from '../game/sound.js';
-import { UPGRADE_POOL } from '../game/upgrades.js';
+import { shouldOfferUpgrade } from '../game/upgrades.js';
 import { createConnection } from '../online/connection.js';
 import { useT, tr } from '../i18n/index.jsx';
 import PlacementScreen from './PlacementScreen.jsx';
@@ -41,6 +41,12 @@ const initialState = {
   gameMode: 'ascensao',
   myUpgrades: [],
   myTurnsPlayed: 0,
+  // Resolução do defensor (problema 3): resultados de tiro/sondagem chegam aqui.
+  shotResult: null,
+  probeResult: null,
+  // Estado de rede (problema 1): oponente caído / eu reconectando.
+  oppDisconnected: false,
+  reconnecting: false,
 };
 
 function maybeStart(s) {
@@ -57,12 +63,11 @@ function maybeStart(s) {
 }
 
 function needsUpgrade(s) {
-  return (
-    s.gameMode === 'duelo' &&
-    s.myTurnsPlayed > 0 &&
-    s.myTurnsPlayed % 3 === 0 &&
-    s.myUpgrades.length < UPGRADE_POOL.length
-  );
+  return shouldOfferUpgrade({
+    gameMode: s.gameMode,
+    turnsPlayed: s.myTurnsPlayed,
+    pickedCount: s.myUpgrades.length,
+  });
 }
 
 function reducer(s, a) {
@@ -72,9 +77,10 @@ function reducer(s, a) {
     case 'created':
       return { ...s, stage: 'hosting', code: a.code, myIndex: 0, error: '' };
     case 'joined':
+      // Convidado: espera o modo definitivo do host antes de posicionar (problema 2).
       return {
         ...s,
-        stage: 'placement',
+        stage: 'waitMode',
         code: a.code,
         myIndex: 1,
         oppName: a.oppName,
@@ -86,9 +92,10 @@ function reducer(s, a) {
     case 'searching':
       return { ...s, stage: 'searching', error: '' };
     case 'match-found':
+      // Índice 0 define o modo e já posiciona; os demais esperam o modo chegar.
       return {
         ...s,
-        stage: 'placement',
+        stage: a.playerIndex === 0 ? 'placement' : 'waitMode',
         code: a.code,
         myIndex: a.playerIndex,
         oppName: a.oppName,
@@ -99,14 +106,26 @@ function reducer(s, a) {
 
     case 'placed':
       return maybeStart({ ...s, ownBoard: a.board });
-    case 'opp-board': {
-      const cells = a.cells.map((pieceId) => ({
-        pieceId,
-        shot: false,
-        revealed: false,
-      }));
-      return maybeStart({ ...s, enemyBoard: cells });
-    }
+    case 'opp-board':
+      // O atacante nunca recebe as posições: só um tabuleiro de névoa vazio.
+      return maybeStart({ ...s, enemyBoard: emptyBoard() });
+
+    case 'shot-result':
+      return {
+        ...s,
+        shotResult: {
+          id: (s.shotResult?.id || 0) + 1,
+          indices: a.indices,
+          hitIndices: a.hitIndices,
+          destroyed: a.destroyed,
+          sunkAll: a.sunkAll,
+        },
+      };
+    case 'probe-result':
+      return {
+        ...s,
+        probeResult: { id: (s.probeResult?.id || 0) + 1, cells: a.cells },
+      };
 
     case 'i-attacked': {
       const ns = {
@@ -117,7 +136,7 @@ function reducer(s, a) {
           hits: s.myStats.hits + a.hitsMade,
         },
       };
-      if (allFound(a.board)) {
+      if (a.sunkAll) {
         return { ...ns, winner: 'me', stage: 'gameover' };
       }
       if (!a.anyHit) {
@@ -212,7 +231,21 @@ function reducer(s, a) {
       return { ...s, myUpgrades: s.myUpgrades.filter((id) => id !== a.upgradeId) };
 
     case 'set-mode':
-      return { ...s, gameMode: a.mode };
+      // Convidado recebeu o modo do host: agora sim pode posicionar (problema 2).
+      return {
+        ...s,
+        gameMode: a.mode,
+        stage: s.stage === 'waitMode' ? 'placement' : s.stage,
+      };
+
+    case 'net-opp-down':
+      return { ...s, oppDisconnected: true };
+    case 'net-opp-up':
+      return { ...s, oppDisconnected: false };
+    case 'net-reconnecting':
+      return { ...s, reconnecting: true };
+    case 'net-reconnected':
+      return { ...s, reconnecting: false, oppDisconnected: false };
 
     case 'rematch-me':
     case 'rematch-opp': {
@@ -273,6 +306,29 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
   const connRef = useRef(null);
   const gameModeRef = useRef(state.gameMode);
   useEffect(() => { gameModeRef.current = state.gameMode; }, [state.gameMode]);
+  // Meu tabuleiro atual, acessível dentro dos handlers de rede (defensor resolve aqui).
+  const ownBoardRef = useRef(state.ownBoard);
+  useEffect(() => { ownBoardRef.current = state.ownBoard; }, [state.ownBoard]);
+
+  // Callbacks estáveis para o BattleScreen enviar tiros/sondagens ao defensor.
+  const sendShot = useCallback((indices) => connRef.current?.relay({ t: 'attack', indices }), []);
+  const sendProbe = useCallback((cells) => connRef.current?.relay({ t: 'probe', cells }), []);
+
+  // Defensor: resolve tiros no próprio tabuleiro e devolve só o resultado.
+  function resolveAttack(indices) {
+    let board = ownBoardRef.current || emptyBoard();
+    const hitIndices = [];
+    let destroyed = null;
+    for (const i of indices) {
+      const r = fire(board, i);
+      if (r) {
+        board = r.board;
+        if (r.hit) hitIndices.push(i);
+        if (r.destroyed) destroyed = { id: r.destroyed.id, emoji: r.destroyed.emoji };
+      }
+    }
+    return { hitIndices, destroyed, sunkAll: allFound(board) };
+  }
 
   useEffect(() => {
     return () => {
@@ -306,39 +362,81 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
   useEffect(() => {
     if (state.stage !== 'gameover') return;
     if (state.winner === 'me') sfx.win();
-    else sfx.miss();
+    else sfx.lose();
   }, [state.stage, state.winner]);
 
   async function getConnection() {
     if (connRef.current) return connRef.current;
     const conn = createConnection();
-    conn.on('created', (m) => dispatch({ type: 'created', code: m.code }));
-    conn.on('joined', (m) =>
-      dispatch({ type: 'joined', code: m.code, oppName: m.oppName })
-    );
+    conn.on('created', (m) => {
+      conn.setReconnect({ code: m.code, playerIndex: m.playerIndex, token: m.token });
+      dispatch({ type: 'created', code: m.code });
+    });
+    conn.on('joined', (m) => {
+      conn.setReconnect({ code: m.code, playerIndex: m.playerIndex, token: m.token });
+      dispatch({ type: 'joined', code: m.code, oppName: m.oppName });
+    });
     conn.on('opponent-joined', (m) => {
       dispatch({ type: 'opponent-joined', oppName: m.oppName });
       conn.relay({ t: 'mode', mode: gameModeRef.current });
     });
     conn.on('searching', () => dispatch({ type: 'searching' }));
     conn.on('match-found', (m) => {
+      conn.setReconnect({ code: m.code, playerIndex: m.playerIndex, token: m.token });
       dispatch({ type: 'match-found', code: m.code, playerIndex: m.playerIndex, oppName: m.oppName });
       // Quem entrou primeiro na fila (índice 0) define o modo para os dois.
       if (m.playerIndex === 0) conn.relay({ t: 'mode', mode: gameModeRef.current });
     });
     conn.on('error', (m) => dispatch({ type: 'error', message: m.message }));
     conn.on('opponent-left', () => dispatch({ type: 'opp-left' }));
+    // Problema 1: eventos de queda/reconexão não encerram a partida.
+    conn.on('opponent-disconnected', () => dispatch({ type: 'net-opp-down' }));
+    conn.on('opponent-reconnected', () => dispatch({ type: 'net-opp-up' }));
+    conn.on('reconnecting', () => dispatch({ type: 'net-reconnecting' }));
+    conn.on('reconnected', () => dispatch({ type: 'net-reconnected' }));
+    conn.on('reconnect-failed', () => {
+      connRef.current = null;
+      dispatch({ type: 'disconnected' });
+    });
     conn.on('closed', () => {
       connRef.current = null;
       dispatch({ type: 'disconnected' });
     });
     conn.on('relay', (m) => {
       const d = m.data || {};
-      if (d.t === 'board') dispatch({ type: 'opp-board', cells: d.cells });
-      if (d.t === 'attack') dispatch({ type: 'attack-received', indices: d.indices });
+      if (d.t === 'board') dispatch({ type: 'opp-board' });
+      if (d.t === 'mode') dispatch({ type: 'set-mode', mode: d.mode });
       if (d.t === 'pass') dispatch({ type: 'pass-received' });
       if (d.t === 'rematch') dispatch({ type: 'rematch-opp' });
-      if (d.t === 'mode') dispatch({ type: 'set-mode', mode: d.mode });
+      // Defensor: resolve o tiro e devolve o resultado ao atacante.
+      if (d.t === 'attack') {
+        const res = resolveAttack(d.indices);
+        conn.relay({
+          t: 'attack-result',
+          indices: d.indices,
+          hitIndices: res.hitIndices,
+          destroyed: res.destroyed,
+          sunkAll: res.sunkAll,
+        });
+        dispatch({ type: 'attack-received', indices: d.indices });
+      }
+      // Defensor: responde a sondagem (radar/anomalia/visão) sem revelar o mapa.
+      if (d.t === 'probe') {
+        const board = ownBoardRef.current || emptyBoard();
+        const cells = d.cells.map((i) => ({ index: i, hasPiece: !!board[i].pieceId }));
+        conn.relay({ t: 'probe-result', cells });
+      }
+      // Atacante: recebe a resolução do defensor.
+      if (d.t === 'attack-result') {
+        dispatch({
+          type: 'shot-result',
+          indices: d.indices,
+          hitIndices: d.hitIndices,
+          destroyed: d.destroyed,
+          sunkAll: d.sunkAll,
+        });
+      }
+      if (d.t === 'probe-result') dispatch({ type: 'probe-result', cells: d.cells });
     });
     await conn.ready;
     connRef.current = conn;
@@ -389,14 +487,14 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
   }
 
   function finishPlacement(board) {
-    connRef.current?.relay({ t: 'board', cells: board.map((c) => c.pieceId) });
+    // Problema 3: só avisa que posicionou — nunca envia as posições das peças.
+    connRef.current?.relay({ t: 'board' });
     dispatch({ type: 'placed', board });
   }
 
-  function handleAttack({ board, indices, shotsFired, hitsMade, anyHit, destroyed }) {
-    connRef.current?.relay({ t: 'attack', indices });
+  function handleAttack({ board, shotsFired, hitsMade, anyHit, destroyed, sunkAll }) {
     if (destroyed) sfx.destroyed();
-    dispatch({ type: 'i-attacked', board, shotsFired, hitsMade, anyHit });
+    dispatch({ type: 'i-attacked', board, shotsFired, hitsMade, anyHit, sunkAll });
   }
 
   function handleTimeout() {
@@ -411,6 +509,21 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
 
   const { stage } = state;
 
+  // Banner de rede (problema 1): oponente caído ou eu tentando reconectar.
+  const netBanner =
+    state.reconnecting || state.oppDisconnected ? (
+      <div
+        style={{
+          position: 'fixed', top: 0, left: 0, right: 0, zIndex: 50,
+          padding: '8px 12px', textAlign: 'center', fontWeight: 600,
+          background: state.reconnecting ? '#8a5a00' : '#664200', color: '#fff',
+        }}
+      >
+        {state.reconnecting ? t('online.reconnecting') : t('online.oppDisconnected')}
+      </div>
+    ) : null;
+
+  function renderStage() {
   if (stage === 'lobby' && quickMatch) {
     return (
       <div className="screen menu fade-in">
@@ -556,6 +669,16 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
     );
   }
 
+  if (stage === 'waitMode') {
+    return (
+      <div className="screen pass fade-in">
+        <div className="pass-icon">🛰️</div>
+        <h2>{t('online.joinedRoom')}</h2>
+        <p className="waiting-dots">{t('online.waitingMode')}</p>
+      </div>
+    );
+  }
+
   if (stage === 'waitBoards') {
     return (
       <div className="screen pass fade-in">
@@ -592,6 +715,10 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
         onSpendEnergy={(amount) => dispatch({ type: 'spend', amount })}
         onTimeout={handleTimeout}
         onUpgradeUsed={(upgradeId) => dispatch({ type: 'use-upgrade', upgradeId })}
+        onSendShot={sendShot}
+        onSendProbe={sendProbe}
+        shotResult={state.shotResult}
+        probeResult={state.probeResult}
       />
     );
   }
@@ -614,6 +741,7 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
           winnerName={state.winner === 'me' ? state.myName || t('online.you') : state.oppName}
           stats={[state.myStats, state.oppStats]}
           names={[state.myName || t('online.you'), state.oppName]}
+          didWin={state.winner === 'me'}
           onRestart={requestRematch}
         />
         {state.rematchMe && (
@@ -631,4 +759,12 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
   }
 
   return null;
+  }
+
+  return (
+    <>
+      {netBanner}
+      {renderStage()}
+    </>
+  );
 }

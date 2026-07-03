@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { ENERGY_PER_TURN } from '../game/constants.js';
-import { UPGRADE_POOL } from '../game/upgrades.js';
+import { shouldOfferUpgrade } from '../game/upgrades.js';
 import { allFound } from '../game/logic.js';
 import { sfx } from '../game/sound.js';
 import Menu from './Menu.jsx';
@@ -50,12 +50,11 @@ export default function LocalGame({ gameMode, onChangeMode }) {
   }
 
   function shouldShowUpgrade(player) {
-    return (
-      gameMode === 'duelo' &&
-      turnsPlayed[player] > 0 &&
-      turnsPlayed[player] % 3 === 0 &&
-      upgrades[player].length < UPGRADE_POOL.length
-    );
+    return shouldOfferUpgrade({
+      gameMode,
+      turnsPlayed: turnsPlayed[player],
+      pickedCount: upgrades[player].length,
+    });
   }
 
   function confirmPass() {

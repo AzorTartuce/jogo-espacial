@@ -1,8 +1,24 @@
 import { useState, useEffect, useRef } from 'react';
-import { SIZE, FLEET, RADAR_COST, PLASMA_COST, TURN_SECONDS } from '../game/constants.js';
-import { fire, radarScan, plasmaCells } from '../game/logic.js';
+import { SIZE, RADAR_COST, PLASMA_COST, TURN_SECONDS } from '../game/constants.js';
+import { plasmaCells, rowCol, idx } from '../game/logic.js';
 import { sfx } from '../game/sound.js';
 import { useT } from '../i18n/index.jsx';
+import MiniBoard from './MiniBoard.jsx';
+
+// Sentinelas: o atacante nunca conhece as peças reais do inimigo (problema 3).
+const HIT_PIECE = '__hit__';
+const SIGNAL_PIECE = '__signal__';
+
+function radarArea(center, radius) {
+  const [row, col] = rowCol(center);
+  const cells = [];
+  for (let r = row - radius; r <= row + radius; r++) {
+    for (let c = col - radius; c <= col + radius; c++) {
+      if (r >= 0 && r < SIZE && c >= 0 && c < SIZE) cells.push(idx(r, c));
+    }
+  }
+  return cells;
+}
 
 export default function TeamBattleScreen({
   myName,
@@ -11,12 +27,17 @@ export default function TeamBattleScreen({
   enemy1Name,
   enemy0Board,
   enemy1Board,
+  enemyIndices,
   ownBoard,
   allyBoard,
   energy,
-  onAttack,
+  onSendShot,
+  onSendProbe,
+  onAttackResolved,
   onSpendEnergy,
   onTimeout,
+  shotResult,
+  probeResult,
 }) {
   const t = useT();
   const [activeTarget, setActiveTarget] = useState(0); // 0 = enemy0, 1 = enemy1
@@ -29,6 +50,14 @@ export default function TeamBattleScreen({
   const [seconds, setSeconds] = useState(TURN_SECONDS);
   const [localEnergy, setLocalEnergy] = useState(energy);
   const timedOut = useRef(false);
+  const pendingRef = useRef(null);
+  const lastShotId = useRef(0);
+  const lastProbeId = useRef(0);
+  const boardsRef = useRef(boards);
+  useEffect(() => { boardsRef.current = boards; }, [boards]);
+
+  // Mapeia o índice do jogador defensor para o painel local (0 ou 1).
+  const boardIdxOf = (targetPlayer) => enemyIndices.indexOf(targetPlayer);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -56,23 +85,29 @@ export default function TeamBattleScreen({
     setTimeout(() => setShake(false), 400);
   }
 
+  // Envia os tiros ao defensor; o resultado volta em `shotResult`.
+  function sendShot(boardIdx, targetPlayer, indices, prefix) {
+    if (!indices.length) return;
+    setLocked(true);
+    setMode('fire');
+    pendingRef.current = { kind: 'shot', boardIdx, targetPlayer, indices, prefix: prefix || null };
+    onSendShot(targetPlayer, indices);
+  }
+
   function handleCellClick(boardIdx, index) {
     if (locked || timedOut.current) return;
 
     const board = boards[boardIdx];
+    const targetPlayer = enemyIndices[boardIdx];
 
     if (mode === 'radar') {
       if (localEnergy < RADAR_COST) return;
       sfx.radar();
       setLocalEnergy((e) => e - RADAR_COST);
       onSpendEnergy(RADAR_COST);
-      setBoards((b) => {
-        const next = [...b];
-        next[boardIdx] = radarScan(b[boardIdx], index);
-        return next;
-      });
-      setMessage(t('battle.radarOn'));
-      setMode('fire');
+      setLocked(true);
+      pendingRef.current = { kind: 'radar', boardIdx, targetPlayer };
+      onSendProbe(targetPlayer, radarArea(index, 1));
       return;
     }
 
@@ -83,48 +118,75 @@ export default function TeamBattleScreen({
       sfx.plasma();
       setLocalEnergy((e) => e - PLASMA_COST);
       onSpendEnergy(PLASMA_COST);
-      let next = board;
-      let hits = 0;
-      let destroyed = null;
-      for (const t of targets) {
-        const r = fire(next, t);
-        if (r) { next = r.board; if (r.hit) hits++; if (r.destroyed) destroyed = r.destroyed; }
-      }
-      finishAttack(boardIdx, next, targets, hits, destroyed, t('battle.plasmaBurst'));
+      sendShot(boardIdx, targetPlayer, targets, t('battle.plasmaBurst'));
       return;
     }
 
-    const result = fire(board, index);
-    if (!result) return;
+    if (board[index].shot) return;
     sfx.laser();
-    finishAttack(boardIdx, result.board, [index], result.hit ? 1 : 0, result.destroyed, null);
+    sendShot(boardIdx, targetPlayer, [index]);
   }
 
-  function finishAttack(boardIdx, nextBoard, indices, hitsMade, destroyed, prefix) {
-    setLocked(true);
+  // Aplica o resultado do tiro devolvido pelo defensor.
+  useEffect(() => {
+    if (!shotResult || shotResult.id === lastShotId.current) return;
+    lastShotId.current = shotResult.id;
+    const pend = pendingRef.current || {};
+    const boardIdx = boardIdxOf(shotResult.targetPlayer);
+    if (boardIdx === -1) return;
+    const { indices, hitIndices, destroyed, targetSunk } = shotResult;
+    const hitSet = new Set(hitIndices);
+    const cur = boardsRef.current;
+    const nextBoard = cur[boardIdx].slice();
+    for (const i of indices) {
+      nextBoard[i] = { ...nextBoard[i], shot: true, pieceId: hitSet.has(i) ? HIT_PIECE : nextBoard[i].pieceId };
+    }
     setBoards((b) => { const n = [...b]; n[boardIdx] = nextBoard; return n; });
     animateHit(boardIdx, indices);
     setMode('fire');
 
-    const anyHit = hitsMade > 0;
+    const anyHit = hitIndices.length > 0;
     setTimeout(() => {
       if (anyHit) sfx.hit();
       else sfx.miss();
+      if (destroyed) sfx.destroyed();
 
       let msg;
       if (destroyed) msg = t('battle.found', { emoji: destroyed.emoji, name: t(`fleet.${destroyed.id}`) });
       else if (anyHit) msg = t('battle.hitMsg');
       else msg = t('battle.missMsg');
-      if (prefix) msg = `${prefix} ${msg}`;
+      if (pend.prefix) msg = `${pend.prefix} ${msg}`;
       setMessage(msg);
 
-      onAttack({ boardIdx, board: nextBoard, indices, hitsMade, anyHit, destroyed });
+      onAttackResolved({ targetPlayer: shotResult.targetPlayer, indices, hitIndices, destroyed, targetSunk });
       if (anyHit) {
         setLocked(false);
         setSeconds(TURN_SECONDS);
       }
     }, 350);
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shotResult]);
+
+  // Aplica o resultado da sondagem de radar devolvido pelo defensor.
+  useEffect(() => {
+    if (!probeResult || probeResult.id === lastProbeId.current) return;
+    lastProbeId.current = probeResult.id;
+    const boardIdx = boardIdxOf(probeResult.targetPlayer);
+    if (boardIdx === -1) return;
+    setBoards((b) => {
+      const next = [...b];
+      const nb = next[boardIdx].slice();
+      for (const c of probeResult.cells) {
+        if (!nb[c.index].shot) nb[c.index] = { ...nb[c.index], revealed: true, pieceId: c.hasPiece ? SIGNAL_PIECE : null };
+      }
+      next[boardIdx] = nb;
+      return next;
+    });
+    setMode('fire');
+    setMessage(t('battle.radarOn'));
+    setLocked(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [probeResult]);
 
   function selectMode(m, cost) {
     if (m !== 'fire' && localEnergy < cost) return;
@@ -151,50 +213,36 @@ export default function TeamBattleScreen({
         <div
           className={`grid target-grid mode-${isActive ? mode : 'fire'}`}
           style={{ '--size': SIZE }}
+          aria-label={t('battle.enemyBoardOf', { name: enemyNames[boardIdx] })}
         >
           {board.map((cell, i) => {
             const justHit = bf.has(i);
             let content = '';
             let cls = 'cell cell-fog';
+            let stateKey = 'battle.cellNotAttacked';
             if (cell.shot && cell.pieceId) {
               content = '👨‍🚀'; cls = `cell cell-hit ${justHit ? 'pop' : ''}`;
+              stateKey = 'battle.cellHit';
             } else if (cell.shot) {
               content = '✦'; cls = `cell cell-miss ${justHit ? 'pop' : ''}`;
+              stateKey = 'battle.cellMiss';
             } else if (cell.revealed) {
               cls = `cell ${cell.pieceId ? 'cell-signal' : 'cell-clear'}`;
               content = cell.pieceId ? '·' : '';
+              stateKey = cell.pieceId ? 'battle.cellSignal' : 'battle.cellClear';
             }
+            const [cr, cc] = rowCol(i);
             return (
               <button
                 key={i}
                 className={cls}
                 onClick={(e) => { e.stopPropagation(); if (isActive) handleCellClick(boardIdx, i); }}
                 disabled={!isActive || (cell.shot && mode === 'fire')}
+                aria-label={t('battle.cell', { row: cr + 1, col: cc + 1, state: t(stateKey) })}
               >
                 {content}
               </button>
             );
-          })}
-        </div>
-      </div>
-    );
-  }
-
-  function renderMiniBoard(board, label, flashCells = new Set()) {
-    if (!board) return null;
-    return (
-      <div className="own-side">
-        <div className="own-title">{label}</div>
-        <div className="grid own-grid" style={{ '--size': SIZE }}>
-          {board.map((cell, i) => {
-            const piece = cell.pieceId ? FLEET.find((p) => p.id === cell.pieceId) : null;
-            const justHit = flashCells.has(i);
-            let cls = 'mini-cell';
-            let content = '';
-            if (piece && cell.shot) { cls += ` mini-hit ${justHit ? 'pop' : ''}`; content = '💥'; }
-            else if (piece) { cls += ' mini-piece'; content = piece.emoji; }
-            else if (cell.shot) cls += ' mini-miss';
-            return <div key={i} className={cls}>{content}</div>;
           })}
         </div>
       </div>
@@ -211,7 +259,7 @@ export default function TeamBattleScreen({
         <div className={timerClass}>⏱️ {seconds}s</div>
       </div>
 
-      <div className="message">{message}</div>
+      <div className="message" role="status" aria-live="polite">{message}</div>
       <p className="team-hint">{t('team.attackSelectTarget')}</p>
 
       <div className="team-enemy-boards">
@@ -243,8 +291,8 @@ export default function TeamBattleScreen({
       )}
 
       <div className="team-mini-boards">
-        {renderMiniBoard(ownBoard, `${myName} (${t('team.you')})`)}
-        {renderMiniBoard(allyBoard, `${allyName} (${t('team.partner')})`)}
+        <MiniBoard board={ownBoard} label={`${myName} (${t('team.you')})`} />
+        <MiniBoard board={allyBoard} label={`${allyName} (${t('team.partner')})`} />
       </div>
     </div>
   );

@@ -7,12 +7,14 @@ import ModeMenu from './components/ModeMenu.jsx';
 import GameModeMenu from './components/GameModeMenu.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import SettingsPanel from './components/SettingsPanel.jsx';
+import HowToPlay from './components/HowToPlay.jsx';
 
 export default function App() {
   const t = useT();
   const [mode, setMode] = useState(null);     // null | 'local' | 'online'
   const [gameMode, setGameMode] = useState(null); // null | 'classico' | 'ascensao'
   const [showSettings, setShowSettings] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
 
   function goToMenu() {
     setMode(null);
@@ -24,7 +26,9 @@ export default function App() {
     let cleanup;
     import('@capacitor/app').then(({ App: CapApp }) => {
       const handle = CapApp.addListener('backButton', () => {
-        if (showSettings) {
+        if (showHelp) {
+          setShowHelp(false);
+        } else if (showSettings) {
           setShowSettings(false);
         } else if (mode === null) {
           CapApp.exitApp();
@@ -35,7 +39,7 @@ export default function App() {
       cleanup = () => handle.then((h) => h.remove());
     });
     return () => cleanup?.();
-  }, [mode, showSettings]);
+  }, [mode, showSettings, showHelp]);
 
   return (
     <div className="app">
@@ -49,6 +53,14 @@ export default function App() {
           )}
           <button
             className="mute-btn"
+            onClick={() => setShowHelp(true)}
+            title={t('help.button')}
+            aria-label={t('help.button')}
+          >
+            ❓
+          </button>
+          <button
+            className="mute-btn"
             onClick={() => setShowSettings(true)}
             title={t('settings.title')}
             aria-label={t('settings.title')}
@@ -59,6 +71,7 @@ export default function App() {
       </header>
 
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
+      {showHelp && <HowToPlay onClose={() => setShowHelp(false)} />}
 
       <ErrorBoundary onReset={goToMenu}>
         {mode === null && <ModeMenu onSelect={setMode} />}

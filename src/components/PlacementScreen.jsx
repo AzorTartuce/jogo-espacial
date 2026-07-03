@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { SIZE, FLEET } from '../game/constants.js';
 import {
   emptyBoard,
@@ -17,6 +17,8 @@ export default function PlacementScreen({ playerName, onDone }) {
   const [selected, setSelected] = useState(FLEET[0].id);
   const [horizontal, setHorizontal] = useState(true);
   const [hoverIndex, setHoverIndex] = useState(null);
+  // Guarda o tipo do último ponteiro para diferenciar toque de mouse.
+  const lastPointerType = useRef('mouse');
 
   const placed = placedPieceIds(board);
   const allPlaced = placed.size === FLEET.length;
@@ -45,14 +47,26 @@ export default function PlacementScreen({ playerName, onDone }) {
       sfx.click();
       setBoard(removePiece(board, cell.pieceId));
       setSelected(cell.pieceId);
+      setHoverIndex(null);
       return;
     }
     if (!selectedPiece || placed.has(selected)) return;
+
+    // Em telas de toque não há "hover": o primeiro toque numa célula mostra o
+    // preview (válido/inválido) e o segundo toque na mesma célula confirma.
+    // No mouse o hover já mostra o preview, então o clique posiciona direto.
+    if (lastPointerType.current === 'touch' && hoverIndex !== index) {
+      sfx.click();
+      setHoverIndex(index);
+      return;
+    }
+
     const cells = canPlace(board, index, selectedPiece.size, horizontal);
     if (!cells) return;
     sfx.click();
     const next = placePiece(board, selected, cells);
     setBoard(next);
+    setHoverIndex(null);
     // Seleciona automaticamente a próxima peça pendente
     const nextPending = FLEET.find((p) => !placedPieceIds(next).has(p.id));
     if (nextPending) setSelected(nextPending.id);
@@ -110,6 +124,9 @@ export default function PlacementScreen({ playerName, onDone }) {
         <div
           className="grid placement-grid"
           style={{ '--size': SIZE }}
+          onPointerDown={(e) => {
+            lastPointerType.current = e.pointerType || 'mouse';
+          }}
           onMouseLeave={() => setHoverIndex(null)}
         >
           {board.map((cell, i) => {
@@ -126,7 +143,11 @@ export default function PlacementScreen({ playerName, onDone }) {
                   inPreview ? (preview.valid ? 'cell-preview' : 'cell-invalid') : '',
                 ].join(' ')}
                 onClick={() => handleCellClick(i)}
-                onMouseEnter={() => setHoverIndex(i)}
+                onPointerEnter={(e) => {
+                  // Só o mouse tem hover contínuo; no toque o preview é
+                  // controlado pelo próprio clique (modelo de dois toques).
+                  if ((e.pointerType || 'mouse') === 'mouse') setHoverIndex(i);
+                }}
               >
                 {piece ? piece.emoji : ''}
               </button>

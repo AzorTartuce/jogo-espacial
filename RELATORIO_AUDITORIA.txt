@@ -1,0 +1,231 @@
+AUDITORIA COMPLETA - RESGATE ESPACIAL
+======================================
+
+Escopo: leitura integral do codigo-fonte (server.js, src/game/*, src/online/*,
+src/components/*, src/i18n/*, src/styles.css), README.md, docs/game-mode.md
+e package.json. Nenhum arquivo do jogo foi alterado.
+
+
+RESPOSTAS DIRETAS
+------------------
+
+1. O jogo ja parece um produto que alguem pagaria para jogar?
+Quase. A mecanica e solida e o polimento (tema, i18n, audio) esta acima da
+media de um projeto hobby, mas falta onboarding fora do fluxo Local, e o
+multiplayer tem uma falha real (tabuleiro do oponente exposto no cliente) e
+nenhuma reconexao. Hoje e um otimo casual gratuito; precisa de mais um ciclo
+para virar algo que gere confianca de pagamento.
+
+2. O que mais prejudica a experiencia?
+Onboarding zero fora do modo Local - quem vai direto para Online/Quick
+Match/Team nunca ve as regras de energia/radar/plasma. Em segundo lugar, o
+preview de posicionamento de navio so funciona com mouse, quebrado em touch,
+apesar do jogo ser publicado para Android.
+
+3. Quais sao os maiores riscos para o lancamento?
+"Fog of war" nao e real no multiplayer (tabuleiro completo do adversario
+chega ao cliente); sem reconexao (qualquer queda derruba a sala inteira,
+pior ainda no 2v2); onboarding ausente; zero testes automatizados no
+projeto.
+
+4. O que esta excelente?
+i18n (pt/en/es) maduro; tema claro/escuro bem arquitetado via CSS vars;
+responsividade mobile cuidadosa de verdade; src/game/logic.js limpo e sem
+bugs; audio sintetizado com workaround dedicado para iOS.
+
+5. O que precisa obrigatoriamente ser melhorado?
+Onboarding em Online/Team, preview de posicionamento em touch, reconexao no
+servidor, reduzir exposicao do tabuleiro do oponente, corrigir corrida de
+sincronizacao de gameMode.
+
+6. Notas (0-10)
+  Diversao            : 7
+  Polimento           : 7.5
+  Clareza             : 4.5
+  UX                  : 5.5
+  Codigo              : 6
+  Potencial comercial : 5.5
+
+
+EXECUTIVE SUMMARY
+------------------
+Base mecanica solida e polimento visual/i18n/tema notavelmente alto para o
+escopo. Os maiores problemas nao sao de diversao - sao de confiabilidade
+multiplayer (sem reconexao, tabuleiro exposto) e onboarding ausente. Sem
+testes automatizados, o que aumenta o risco de qualquer correcao
+pre-lancamento quebrar algo silenciosamente.
+
+
+PONTOS FORTES
+-------------
+- Mecanica central simples e com boa curva tatica (tiro/radar/plasma/
+  "acerta e joga de novo").
+- i18n maduro com fallback seguro e API dupla (React + fora de React).
+- Tema claro/escuro limpo, aplicado antes do first paint.
+- Mobile cuidado de verdade (grid fluido, viewport dinamico, gestos
+  controlados).
+- logic.js puro, pequeno, sem bugs.
+- Audio sintetizado com tratamento de autoplay no iOS.
+
+
+PONTOS FRACOS
+-------------
+- Onboarding inexistente fora do Local.
+- Preview de posicionamento quebrado em touch.
+- Tres estilos de state management diferentes + logica duplicada
+  (shouldShowUpgrade/needsUpgrade).
+- OnlineGame.jsx/TeamGame.jsx sao componentes "deus" (634/572 linhas).
+- Duplicacao de MiniBoard e de mapas de icone de modo em 3 arquivos.
+- Zero testes automatizados.
+- Acessibilidade quase nula na tela de batalha.
+- Shuffle de upgrades enviesado.
+- GameOver sem "juice" no momento de climax.
+
+
+PROBLEMAS CRITICOS
+-------------------
+1. Tabuleiro do oponente exposto no cliente ("map hack") - servidor e
+   relay sem autoridade de jogo.
+2. Sem reconexao - 1 desconexao derruba a sala inteira, grave no 2v2.
+3. Corrida de sincronizacao de gameMode no OnlineGame.
+4. Onboarding ausente em Online/Team.
+5. Sem validacao nenhuma no servidor (turno, indices, tamanho de payload).
+
+
+MELHORIAS RECOMENDADAS
+------------------------
+- Etapa de regras antes da primeira partida Online/Team, ou botao
+  "Como jogar" global.
+- Preview de posicionamento tambem via toque.
+- Grace period de reconexao no servidor.
+- Reduzir exposicao do tabuleiro (idealmente mover resolucao de tiro
+  pro servidor).
+- Unificar logica de upgrade e mapas de icone duplicados.
+- Extrair MiniBoard compartilhado.
+- Fisher-Yates no shuffle de upgrades.
+- aria-label/aria-live na tela de batalha; corrigir aria-label="X" do
+  SettingsPanel.
+- Mais impacto visual no GameOver + som de derrota distinto.
+- Diferenciar os 4 eventos de Instabilidade e considerar sincroniza-los
+  online (hoje cada cliente sorteia independentemente, contrariando o
+  design doc).
+- Testes para logic.js, events.js, upgrades.js.
+
+
+ROADMAP PRIORIZADO POR IMPACTO
+--------------------------------
+
+P0 (bloqueadores de lancamento):
+  - Onboarding Online/Team
+  - Preview touch
+  - Grace period de reconexao
+
+P1 (logo apos lancamento):
+  - Corrigir race de gameMode
+  - Reduzir exposicao do tabuleiro
+  - Validacao basica de turno/indice no servidor
+
+P2 (qualidade/retencao):
+  - Juice no GameOver + som de derrota
+  - Diferenciar eventos de Instabilidade
+  - Acessibilidade da batalha
+
+P3 (saude de longo prazo do codigo):
+  - Unificar logica/icones duplicados
+  - Extrair MiniBoard
+  - Testes automatizados
+  - Fisher-Yates no shuffle
+
+
+--------------------------------------------------------------------
+Achados detalhados adicionais (base tecnica dos 3 agentes de exploracao)
+--------------------------------------------------------------------
+
+NUCLEO DO JOGO E SERVIDOR
+- Board 8x8 (64 celulas), frota ocupa 12 celulas (~18.75% de densidade).
+- fire() em logic.js e a unica funcao de resolucao de tiro; allFound()
+  verifica vitoria. Ambas corretas e sem bugs.
+- Regra "acertou, joga de novo": turno so passa em erro ou timeout,
+  implementada de forma identica (porem duplicada) em LocalGame.jsx e no
+  reducer de OnlineGame.jsx.
+- Timer de turno (30s) reseta a cada acerto - um jogador em sequencia de
+  acertos tem tempo efetivamente ilimitado no turno.
+- Contagem de "turnsPlayed" (que libera upgrades no modo Duelo) so
+  incrementa em erro/timeout, nunca em acerto - jogador mais preciso
+  recebe upgrades mais devagar (mecanica de catch-up, mas le como
+  contra-intuitiva).
+- Eventos do modo Instabilidade sao sorteados e cronometrados de forma
+  independente por cliente (nao sincronizados) - quebra a premissa de
+  "evento global" do design doc (docs/game-mode.md).
+- Upgrades (6 no total) sao todos buffs puros sem trade-off; radar_xl
+  dobra a area do radar sem custo extra, ao contrario dos demais.
+- Shuffle de upgrades usa sort(() => Math.random() - 0.5), enviesado
+  (nao e Fisher-Yates).
+- server.js e um relay burro: sem validacao de estado de jogo, sem
+  autoridade sobre o tabuleiro, sem checagem de turno/indices, sem
+  maxPayload configurado no WebSocketServer, sem autenticacao.
+- O tabuleiro completo do oponente (posicoes reais das naves) chega ao
+  cliente adversario logo apos o posicionamento - fog of war e so
+  convencao de UI.
+- Desconexao de qualquer jogador derruba a sala inteira instantaneamente,
+  sem grace period - grave no modo 2v2 (Team), onde 3 jogadores validos
+  sao expulsos por causa de 1 queda de sinal.
+- Audio 100% sintetizado via Web Audio (sem arquivos externos), com
+  workaround para desbloqueio no iOS (gesto do usuario + resume em
+  visibilitychange). Nao ha som distinto de derrota (reusa sfx.miss()),
+  e 3 dos 4 eventos de Instabilidade reusam sons de radar/plasma/miss.
+
+FLUXO DE TELAS E COMPONENTES
+- App.jsx centraliza mode/gameMode; cada fluxo (Local/Online/Team) tem
+  seu proprio "motor" de estado: LocalGame usa useState solto, Online e
+  TeamGame usam useReducer - arquiteturas inconsistentes entre si.
+- OnlineGame.jsx (634 linhas) e TeamGame.jsx (572 linhas) sao componentes
+  "deus": reducer + websocket + ~10 views inline no mesmo arquivo.
+- TeamGame nao possui seletor de modo de jogo - sempre se comporta como
+  "ascensao", sem informar isso ao jogador.
+- Nao existe tutorial/onboarding em lugar nenhum do codigo (confirmado
+  por busca textual).
+- Menu.jsx (unico lugar com as regras basicas) so aparece no fluxo Local;
+  Online/Team nunca o renderizam.
+- Atalho de teclado "R" para girar peca nunca e indicado na UI.
+- PlacementScreen depende exclusivamente de onMouseEnter/onMouseLeave
+  para o preview de posicionamento - nao funciona em touch.
+- Sem indicacao textual de "Conectando..." durante setup do websocket
+  (botao so fica desabilitado).
+- Erros de conexao mostram mensagem generica; desconexao reseta todo o
+  estado da partida sem tentativa de reconexao.
+- Race real: guest no OnlineGame pode comecar a posicionar pecas com o
+  gameMode padrao errado antes do relay do host corrigir.
+- localEnergy em BattleScreen/TeamBattleScreen nao tem useEffect de
+  resync se a prop mudar com o componente ja montado - funciona hoje so
+  porque o componente e remontado a cada turno (padrao implicito e
+  fragil).
+- Acessibilidade praticamente inexistente na tela de batalha: sem
+  aria-label nas celulas, sem aria-live nos resultados de tiro, sem
+  navegacao por teclado.
+- Duplicacao real de componente: MiniBoard em TeamGame.jsx e quase
+  identico a renderMiniBoard em TeamBattleScreen.jsx.
+
+UI, ESTILO E I18N
+- i18n com deteccao automatica de idioma (navigator.language),
+  persistencia em localStorage, interpolacao de parametros, API dupla
+  (useT() para React, tr() fora de React) - implementacao completa e
+  consistente nos 9 componentes revisados.
+- Unico bug de i18n/acessibilidade encontrado: aria-label="X" no botao
+  fechar do SettingsPanel - nao traduzido e sem sentido para leitor de
+  tela.
+- Tema claro/escuro via variaveis CSS e atributo data-theme, aplicado
+  antes do primeiro paint; unico ponto fora do padrao e a cor inline
+  fixa do ErrorBoundary, que nao se adapta ao tema claro.
+- Boa consistencia de botoes/cards (big-btn, small-btn, settings-chip),
+  spacing e grids reutilizados entre as telas.
+- CSS mobile dedicado (media query 640px) com truques de grid fluido,
+  100dvh e prevencao de gestos indesejados - acima da media para um
+  projeto desse porte.
+- GameOver e a tela com menos "juice" apesar de ser o momento de climax
+  emocional (so um trofeu com animacao de flutuar, sem confete/particulas
+  ou som de vitoria diferenciado por performance).
+- EventBanner nao diferencia visualmente eventos bons de eventos ruins
+  (todos usam a mesma cor).
+- Pequena duplicacao de baixo custo: padrao sfx.click() + callback
+  repetido em 7+ componentes.

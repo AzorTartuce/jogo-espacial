@@ -1,13 +1,35 @@
 import { sfx } from '../game/sound.js';
 import { useT } from '../i18n/index.jsx';
 
-export default function GameOver({ winnerName, stats, names, onRestart }) {
+// Cores do confete de vitória (mesma paleta do tema).
+const CONFETTI_COLORS = ['#4de8ff', '#b16dff', '#5dffa8', '#ffd75e', '#ff5e5e'];
+const CONFETTI = Array.from({ length: 28 });
+
+export default function GameOver({ winnerName, stats, names, onRestart, didWin = true }) {
   const t = useT();
   return (
-    <div className="screen gameover fade-in">
-      <div className="trophy">🏆</div>
+    <div className={`screen gameover fade-in ${didWin ? 'gameover-win' : 'gameover-lose'}`}>
+      {didWin && (
+        <div className="confetti" aria-hidden="true">
+          {CONFETTI.map((_, i) => (
+            <span
+              key={i}
+              className="confetti-piece"
+              style={{
+                left: `${(i / CONFETTI.length) * 100}%`,
+                background: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+                animationDelay: `${(i % 7) * 0.22}s`,
+                animationDuration: `${2.6 + (i % 5) * 0.4}s`,
+              }}
+            />
+          ))}
+        </div>
+      )}
+
+      <div className={`trophy ${didWin ? 'trophy-win' : ''}`}>{didWin ? '🏆' : '🎖️'}</div>
       <h2>
-        <span className="highlight">{winnerName}</span> {t('gameover.rescued')}
+        <span className={`highlight ${didWin ? 'winner-glow' : ''}`}>{winnerName}</span>{' '}
+        {t('gameover.rescued')}
       </h2>
 
       <div className="stats">

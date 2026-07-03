@@ -834,6 +834,66 @@ body::after {
   animation: float 2.4s ease-in-out infinite;
 }
 
+/* Vitória: troféu pulsa e brilha dourado; derrota: medalha contida. */
+.trophy-win {
+  animation: float 2.4s ease-in-out infinite, trophyGlow 1.6s ease-in-out infinite;
+}
+.gameover-lose .trophy {
+  opacity: 0.9;
+  filter: grayscale(0.15);
+}
+
+@keyframes trophyGlow {
+  0%, 100% {
+    filter: drop-shadow(0 0 10px rgba(255, 215, 94, 0.55));
+    transform: scale(1);
+  }
+  50% {
+    filter: drop-shadow(0 0 28px rgba(255, 215, 94, 0.95));
+    transform: scale(1.08);
+  }
+}
+
+.winner-glow {
+  animation: winnerGlow 1.6s ease-in-out infinite;
+}
+@keyframes winnerGlow {
+  0%, 100% { text-shadow: 0 0 8px rgba(93, 255, 168, 0.4); }
+  50%      { text-shadow: 0 0 22px rgba(93, 255, 168, 0.9); }
+}
+
+/* Confete de vitória (só CSS: transform + opacity). */
+.confetti {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 5;
+}
+.confetti-piece {
+  position: absolute;
+  top: -12px;
+  width: 9px;
+  height: 14px;
+  border-radius: 2px;
+  opacity: 0;
+  animation-name: confettiFall;
+  animation-iteration-count: infinite;
+  animation-timing-function: linear;
+}
+@keyframes confettiFall {
+  0%   { transform: translateY(-12px) rotate(0deg); opacity: 0; }
+  10%  { opacity: 1; }
+  100% { transform: translateY(105vh) rotate(720deg); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .confetti-piece,
+  .trophy-win,
+  .winner-glow { animation: none; }
+  .confetti { display: none; }
+}
+
 .stats {
   display: flex;
   gap: 20px;
@@ -1036,8 +1096,45 @@ body::after {
 }
 
 .event-icon { font-size: 2rem; flex-shrink: 0; }
-.event-name { font-weight: 800; color: var(--purple); font-size: 1rem; }
+.event-name {
+  font-weight: 800;
+  color: var(--purple);
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .event-desc { font-size: 0.82rem; color: #b9c2e8; margin-top: 2px; }
+
+/* Valência do evento: verde = ajuda você, vermelho = atrapalha você. */
+.event-badge {
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.event-good {
+  border-color: var(--green);
+  box-shadow: 0 0 32px rgba(93, 255, 168, 0.5);
+}
+.event-good .event-name { color: var(--green); }
+.event-good .event-badge {
+  color: #06210f;
+  background: var(--green);
+}
+.event-bad {
+  border-color: var(--red);
+  box-shadow: 0 0 32px rgba(255, 94, 94, 0.5);
+}
+.event-bad .event-name { color: var(--red); }
+.event-bad .event-badge {
+  color: #2a0808;
+  background: var(--red);
+}
 
 /* ===== Tela de upgrade (Duelo) ===== */
 .upgrade-header {
@@ -1468,4 +1565,36 @@ body::after {
   background: linear-gradient(135deg, rgba(77, 232, 255, 0.22), rgba(177, 109, 255, 0.22));
   color: var(--cyan);
   font-weight: 600;
+}
+
+/* ===== Painel "Como jogar" (reaproveita o overlay das opções) ===== */
+.help-panel {
+  max-width: 440px;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.help-modes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.help-mode {
+  border: 1px solid rgba(128, 128, 160, 0.28);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: rgba(128, 128, 160, 0.08);
+}
+
+.help-mode-title {
+  font-weight: 700;
+  color: var(--cyan);
+  margin-bottom: 3px;
+}
+
+.help-mode-desc {
+  font-size: 0.85rem;
+  opacity: 0.82;
+  line-height: 1.35;
 }

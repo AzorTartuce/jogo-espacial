@@ -30,7 +30,7 @@ export default function SettingsPanel({ onClose }) {
       >
         <div className="settings-head">
           <h2>⚙️ {t('settings.title')}</h2>
-          <button className="settings-close" onClick={onClose} aria-label="X">
+          <button className="settings-close" onClick={onClose} aria-label={t('settings.close')}>
             ✕
           </button>
         </div>

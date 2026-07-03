@@ -111,5 +111,54 @@ export const sfx = {
       tone({ freq: f, dur: 0.3, type: 'triangle', vol: 0.15, delay: i * 0.15 })
     );
   },
+  // Derrota: arpejo descendente melancólico (menor) + "power down" caindo.
+  lose: () => {
+    [440, 349, 262, 196].forEach((f, i) =>
+      tone({ freq: f, dur: 0.4, type: 'triangle', vol: 0.13, delay: i * 0.18 })
+    );
+    tone({ freq: 160, end: 55, dur: 0.9, type: 'sawtooth', vol: 0.1, delay: 0.6 });
+  },
   click: () => tone({ freq: 700, dur: 0.06, type: 'sine', vol: 0.08 }),
+
+  // ===== Sons dos eventos de Instabilidade (cada um distinto) =====
+  // Nebulosa (ruim): varredura grave e abafada, "engolindo" o sinal.
+  eventNebula: () => {
+    tone({ freq: 420, end: 90, dur: 0.7, type: 'sine', vol: 0.14 });
+    tone({ freq: 210, end: 60, dur: 0.8, type: 'sine', vol: 0.08, delay: 0.05 });
+  },
+  // Interferência (ruim): estática dissonante e nervosa, sinal picotado.
+  eventInterference: () => {
+    [0, 0.09, 0.18, 0.27].forEach((d, i) =>
+      tone({ freq: i % 2 ? 180 : 320, dur: 0.06, type: 'sawtooth', vol: 0.12, delay: d })
+    );
+    tone({ freq: 900, end: 300, dur: 0.25, type: 'square', vol: 0.06, delay: 0.06 });
+  },
+  // Visão Privilegiada (bom): ping cristalino ascendente, "descoberta".
+  eventVision: () => {
+    tone({ freq: 660, end: 990, dur: 0.22, type: 'triangle', vol: 0.13 });
+    tone({ freq: 1320, dur: 0.18, type: 'sine', vol: 0.08, delay: 0.16 });
+    tone({ freq: 1760, dur: 0.16, type: 'sine', vol: 0.06, delay: 0.3 });
+  },
+  // Tempestade Solar (ruim): surto elétrico grave com crepitação aguda.
+  eventStorm: () => {
+    tone({ freq: 70, end: 220, dur: 0.5, type: 'sawtooth', vol: 0.16 });
+    tone({ freq: 1500, end: 400, dur: 0.4, type: 'square', vol: 0.07, delay: 0.05 });
+    tone({ freq: 2200, dur: 0.05, type: 'square', vol: 0.05, delay: 0.28 });
+  },
 };
+
+// Toca o som próprio de cada evento de Instabilidade a partir do id.
+export function playEventSound(id) {
+  switch (id) {
+    case 'nebula':
+      return sfx.eventNebula();
+    case 'interference':
+      return sfx.eventInterference();
+    case 'vision':
+      return sfx.eventVision();
+    case 'solar_storm':
+      return sfx.eventStorm();
+    default:
+      return undefined;
+  }
+}

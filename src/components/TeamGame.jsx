@@ -1,13 +1,15 @@
-import { useReducer, useRef, useEffect, useState } from 'react';
-import { FLEET, ENERGY_PER_TURN } from '../game/constants.js';
-import { fire, allFound } from '../game/logic.js';
+import { useReducer, useRef, useEffect, useState, useCallback } from 'react';
+import { ENERGY_PER_TURN } from '../game/constants.js';
+import { fire, allFound, emptyBoard } from '../game/logic.js';
 import { sfx } from '../game/sound.js';
 import { createConnection } from '../online/connection.js';
 import { useT, tr } from '../i18n/index.jsx';
 import PlacementScreen from './PlacementScreen.jsx';
 import TeamBattleScreen from './TeamBattleScreen.jsx';
+import MiniBoard from './MiniBoard.jsx';
 
-const FLEET_MAP = Object.fromEntries(FLEET.map((p) => [p.id, p]));
+// Sentinela: o atacante marca um acerto sem jamais conhecer a peça real do inimigo.
+const HIT_PIECE = '__hit__';
 
 // ─── helpers de índice ───────────────────────────────────────────────────────
 // ta = teamAssignment: { [playerIndex]: 0|1 }
@@ -51,6 +53,11 @@ const init = {
   rematchVotes: [false, false, false, false],
   teamChoices: {},     // { [playerIndex]: 0|1 } — escolhas em andamento
   teamAssignment: null,// { [playerIndex]: 0|1 } — fixado ao iniciar
+  sunk: {},            // { [playerIndex]: true } — tabuleiros totalmente encontrados
+  shotResult: null,    // resolução de tiro devolvida pelo defensor (problema 3)
+  probeResult: null,   // resolução de sondagem devolvida pelo defensor
+  oppDisconnected: false, // problema 1: alguém caiu, aguardando reconexão
+  reconnecting: false,    // problema 1: eu tentando reconectar
 };
 
 function cellsToBoard(cells) {
@@ -101,66 +108,80 @@ function reducer(s, a) {
       return { ...ns, stage: 'waitPlacement' };
     }
     case 'board-received': {
-      const boards = { ...s.boards, [a.fromPlayer]: cellsToBoard(a.cells) };
+      // Do aliado chega o tabuleiro completo; do inimigo, só a névoa (problema 3).
+      const board = a.fog ? emptyBoard() : cellsToBoard(a.cells);
+      const boards = { ...s.boards, [a.fromPlayer]: board };
       const boardCount = s.boardCount + 1;
       const ns = { ...s, boards, boardCount };
       if (boardCount >= 4) return stageFor({ ...ns, currentAttacker: 0, energy: 0 });
       return ns;
     }
 
-    case 'i-attacked': {
-      const ta = s.teamAssignment;
-      const boards = a.board ? { ...s.boards, [a.targetPlayer]: a.board } : s.boards;
-      const myStats = {
-        shots: s.myStats.shots + a.shotsFired,
-        hits:  s.myStats.hits  + a.hitsMade,
+    case 'shot-result':
+      return {
+        ...s,
+        shotResult: {
+          id: (s.shotResult?.id || 0) + 1,
+          targetPlayer: a.targetPlayer,
+          indices: a.indices,
+          hitIndices: a.hitIndices,
+          destroyed: a.destroyed,
+          targetSunk: a.targetSunk,
+        },
       };
-      const ca = nextAttacker(s.myIndex, a.anyHit);
-      const ns = { ...s, boards, myStats, currentAttacker: ca };
-      const enemies = enemiesOf(s.myIndex, ta);
-      if (enemies.every((pi) => ns.boards[pi] && allFound(ns.boards[pi]))) {
-        sfx.win();
-        return { ...ns, winner: teamOf(s.myIndex, ta), stage: 'gameover' };
-      }
-      return stageFor(ns, !a.anyHit);
-    }
+    case 'probe-result':
+      return {
+        ...s,
+        probeResult: {
+          id: (s.probeResult?.id || 0) + 1,
+          targetPlayer: a.targetPlayer,
+          cells: a.cells,
+        },
+      };
 
-    case 'attack-received': {
-      const { fromPlayer, targetPlayer, indices } = a;
+    // Aplica uma jogada resolvida pelo defensor. Usado pelo atacante (após animar),
+    // pelo defensor (localmente) e pelos aliados (via broadcast). Timeout: targetPlayer -1.
+    case 'apply-attack': {
       const ta = s.teamAssignment;
+      const { fromPlayer, targetPlayer, indices } = a;
+      const hitIndices = a.hitIndices || [];
+      const destroyed = a.destroyed || null;
       const isTimeout = targetPlayer === -1;
+      const hitSet = new Set(hitIndices);
+      const hits = hitIndices.length;
 
-      let boards = { ...s.boards };
-      let hits = 0;
-      let destroyed = null;
-      if (!isTimeout) {
-        const target = boards[targetPlayer];
-        if (target) {
-          let b = target;
-          for (const i of indices) {
-            const r = fire(b, i);
-            if (r) { b = r.board; if (r.hit) hits++; if (r.destroyed) destroyed = r.destroyed; }
-          }
-          boards = { ...boards, [targetPlayer]: b };
+      let boards = s.boards;
+      if (!isTimeout && s.boards[targetPlayer]) {
+        const tb = s.boards[targetPlayer].slice();
+        for (const i of indices) {
+          tb[i] = {
+            ...tb[i],
+            shot: true,
+            pieceId: tb[i].pieceId || (hitSet.has(i) ? HIT_PIECE : null),
+          };
         }
+        boards = { ...boards, [targetPlayer]: tb };
       }
+
+      const sunk = !isTimeout && a.targetSunk ? { ...s.sunk, [targetPlayer]: true } : s.sunk;
 
       const isMyBoard   = !isTimeout && targetPlayer === s.myIndex;
       const isAllyBoard = !isTimeout && targetPlayer === allyOf(s.myIndex, ta);
       const isEnemyAtk  = teamOf(fromPlayer, ta) !== teamOf(s.myIndex, ta);
+      const isMyAttack  = fromPlayer === s.myIndex;
 
+      let myStats = s.myStats;
       let oppStats = s.oppStats;
-      if (isEnemyAtk && !isTimeout) {
-        oppStats = { shots: s.oppStats.shots + indices.length, hits: s.oppStats.hits + hits };
+      if (!isTimeout) {
+        if (isMyAttack) myStats = { shots: s.myStats.shots + indices.length, hits: s.myStats.hits + hits };
+        else if (isEnemyAtk) oppStats = { shots: s.oppStats.shots + indices.length, hits: s.oppStats.hits + hits };
       }
 
       const ca = nextAttacker(fromPlayer, hits > 0);
       let msg = '';
       if (isTimeout) {
         const name = s.players[fromPlayer] ?? tr('team.defaultPlayer', { n: fromPlayer + 1 });
-        msg = isEnemyAtk
-          ? tr('team.outOfTime', { name })
-          : tr('team.outOfTimeAlly', { name });
+        msg = isEnemyAtk ? tr('team.outOfTime', { name }) : tr('team.outOfTimeAlly', { name });
       } else if (destroyed) {
         msg = tr('team.foundShip', { emoji: destroyed.emoji, name: tr(`fleet.${destroyed.id}`) });
       } else if (hits > 0) {
@@ -172,21 +193,39 @@ function reducer(s, a) {
       const ns = {
         ...s,
         boards,
+        sunk,
+        myStats,
         oppStats,
         currentAttacker: ca,
         defendFlash: isMyBoard   ? indices : [],
         allyFlash:   isAllyBoard ? indices : [],
-        defendMsg:   isEnemyAtk                        ? msg : s.defendMsg,
+        defendMsg:   isEnemyAtk ? msg : s.defendMsg,
         allyMsg:     (isAllyBoard || (isTimeout && !isEnemyAtk)) ? msg : s.allyMsg,
       };
 
-      const myTeam = teamOf(s.myIndex, ta);
-      const myMembers = [0, 1, 2, 3].filter((pi) => teamOf(pi, ta) === myTeam);
-      if (myMembers.every((pi) => ns.boards[pi] && allFound(ns.boards[pi]))) {
-        return { ...ns, winner: teamOf(fromPlayer, ta), stage: 'gameover' };
+      // Um time perde quando os dois integrantes foram totalmente encontrados.
+      if (!isTimeout) {
+        for (const team of [0, 1]) {
+          const members = [0, 1, 2, 3].filter((pi) => teamOf(pi, ta) === team);
+          if (members.every((pi) => ns.sunk[pi])) {
+            const winner = 1 - team;
+            if (winner === teamOf(s.myIndex, ta)) sfx.win();
+            else sfx.lose();
+            return { ...ns, winner, stage: 'gameover' };
+          }
+        }
       }
-      return stageFor(ns);
+      return stageFor(ns, !(hits > 0 && !isTimeout));
     }
+
+    case 'net-opp-down':
+      return { ...s, oppDisconnected: true };
+    case 'net-opp-up':
+      return { ...s, oppDisconnected: false };
+    case 'net-reconnecting':
+      return { ...s, reconnecting: true };
+    case 'net-reconnected':
+      return { ...s, reconnecting: false, oppDisconnected: false };
 
     case 'spend':
       return { ...s, energy: s.energy - a.amount };
@@ -212,6 +251,9 @@ function reducer(s, a) {
           rematchVotes: [false, false, false, false],
           teamChoices: {},
           teamAssignment: null,
+          sunk: {},
+          shotResult: null,
+          probeResult: null,
         };
       }
       return { ...s, rematchVotes: votes };
@@ -235,6 +277,33 @@ export default function TeamGame({ onExit }) {
   const [codeInput, setCodeInput] = useState('');
   const [connecting, setConnecting] = useState(false);
   const connRef = useRef(null);
+  // Refs para os handlers de rede (que rodam fora do fluxo de render).
+  const myIndexRef = useRef(state.myIndex);
+  const taRef = useRef(state.teamAssignment);
+  const ownBoardRef = useRef(null);
+  useEffect(() => { myIndexRef.current = state.myIndex; }, [state.myIndex]);
+  useEffect(() => { taRef.current = state.teamAssignment; }, [state.teamAssignment]);
+  useEffect(() => { ownBoardRef.current = state.boards[state.myIndex] || null; }, [state.boards, state.myIndex]);
+
+  // Callbacks estáveis para o TeamBattleScreen enviar tiros/sondagens ao defensor.
+  const sendShot = useCallback((targetPlayer, indices) => connRef.current?.relay({ t: 'attack', targetPlayer, indices }, targetPlayer), []);
+  const sendProbe = useCallback((targetPlayer, cells) => connRef.current?.relay({ t: 'probe', targetPlayer, cells }, targetPlayer), []);
+
+  // Defensor: resolve tiros no próprio tabuleiro e devolve só o resultado.
+  function resolveAttack(indices) {
+    let board = ownBoardRef.current || emptyBoard();
+    const hitIndices = [];
+    let destroyed = null;
+    for (const i of indices) {
+      const r = fire(board, i);
+      if (r) {
+        board = r.board;
+        if (r.hit) hitIndices.push(i);
+        if (r.destroyed) destroyed = { id: r.destroyed.id, emoji: r.destroyed.emoji };
+      }
+    }
+    return { hitIndices, destroyed, sunkAll: allFound(board) };
+  }
 
   useEffect(() => () => { connRef.current?.close(); connRef.current = null; }, []);
 
@@ -250,20 +319,57 @@ export default function TeamGame({ onExit }) {
   async function getConn() {
     if (connRef.current) return connRef.current;
     const conn = createConnection();
-    conn.on('team-created',       (m) => dispatch({ type: 'team-created',       code: m.code, players: m.players }));
-    conn.on('team-joined',        (m) => dispatch({ type: 'team-joined',        code: m.code, playerIndex: m.playerIndex, players: m.players }));
+    conn.on('team-created',       (m) => { conn.setReconnect({ code: m.code, playerIndex: m.playerIndex, token: m.token }); dispatch({ type: 'team-created', code: m.code, players: m.players }); });
+    conn.on('team-joined',        (m) => { conn.setReconnect({ code: m.code, playerIndex: m.playerIndex, token: m.token }); dispatch({ type: 'team-joined', code: m.code, playerIndex: m.playerIndex, players: m.players }); });
     conn.on('team-player-joined', (m) => dispatch({ type: 'team-player-joined', playerIndex: m.playerIndex, name: m.name, players: m.players }));
     conn.on('team-start',         (m) => dispatch({ type: 'team-start',         players: m.players }));
     conn.on('error',              (m) => dispatch({ type: 'error',              message: m.message }));
     conn.on('opponent-left',      ()  => dispatch({ type: 'opp-left' }));
+    // Problema 1: queda/reconexão não encerram a partida.
+    conn.on('opponent-disconnected', () => dispatch({ type: 'net-opp-down' }));
+    conn.on('opponent-reconnected',  () => dispatch({ type: 'net-opp-up' }));
+    conn.on('reconnecting',          () => dispatch({ type: 'net-reconnecting' }));
+    conn.on('reconnected',           () => dispatch({ type: 'net-reconnected' }));
+    conn.on('reconnect-failed',      () => { connRef.current = null; dispatch({ type: 'disconnected' }); });
     conn.on('closed',             ()  => { connRef.current = null; dispatch({ type: 'disconnected' }); });
     conn.on('relay', (m) => {
       const d = m.data || {};
       const from = m.fromIndex ?? -1;
-      if (d.t === 'board')      dispatch({ type: 'board-received',  fromPlayer: from, cells: d.cells });
-      if (d.t === 'attack')     dispatch({ type: 'attack-received', fromPlayer: from, targetPlayer: d.targetPlayer, indices: d.indices });
-      if (d.t === 'rematch')    dispatch({ type: 'rematch-vote',    playerIndex: from });
-      if (d.t === 'team-pick')  dispatch({ type: 'pick-team',       playerIndex: d.playerIndex, team: d.team });
+      if (d.t === 'board')       dispatch({ type: 'board-received', fromPlayer: from, cells: d.cells });
+      if (d.t === 'board-ready') dispatch({ type: 'board-received', fromPlayer: from, fog: true });
+      if (d.t === 'rematch')     dispatch({ type: 'rematch-vote',   playerIndex: from });
+      if (d.t === 'team-pick')   dispatch({ type: 'pick-team',      playerIndex: d.playerIndex, team: d.team });
+
+      // Timeout do atacante: repassado a todos, sem resolução de tabuleiro.
+      if (d.t === 'timeout') {
+        dispatch({ type: 'apply-attack', fromPlayer: from, targetPlayer: -1, indices: [], hitIndices: [] });
+      }
+      // Sou o defensor: resolvo o tiro e transmito o resultado ao restante da sala.
+      if (d.t === 'attack' && d.targetPlayer === myIndexRef.current) {
+        const res = resolveAttack(d.indices);
+        const payload = {
+          t: 'attack-result', fromPlayer: from, targetPlayer: d.targetPlayer,
+          indices: d.indices, hitIndices: res.hitIndices, destroyed: res.destroyed, targetSunk: res.sunkAll,
+        };
+        conn.relay(payload); // aos outros 3
+        dispatch({ type: 'apply-attack', ...payload });
+      }
+      // Sou o defensor de uma sondagem: devolvo só presença/ausência ao atacante.
+      if (d.t === 'probe' && d.targetPlayer === myIndexRef.current) {
+        const board = ownBoardRef.current || emptyBoard();
+        const cells = d.cells.map((i) => ({ index: i, hasPiece: !!board[i].pieceId }));
+        conn.relay({ t: 'probe-result', targetPlayer: d.targetPlayer, cells }, from);
+      }
+      // Resultado de tiro: se fui eu quem atacou, animo no TeamBattleScreen; senão aplico direto.
+      if (d.t === 'attack-result') {
+        if (d.fromPlayer === myIndexRef.current) {
+          dispatch({ type: 'shot-result', targetPlayer: d.targetPlayer, indices: d.indices, hitIndices: d.hitIndices, destroyed: d.destroyed, targetSunk: d.targetSunk });
+        } else {
+          dispatch({ type: 'apply-attack', fromPlayer: d.fromPlayer, targetPlayer: d.targetPlayer, indices: d.indices, hitIndices: d.hitIndices, destroyed: d.destroyed, targetSunk: d.targetSunk });
+        }
+      }
+      // Resultado de sondagem chega só para o atacante.
+      if (d.t === 'probe-result') dispatch({ type: 'probe-result', targetPlayer: d.targetPlayer, cells: d.cells });
     });
     await conn.ready;
     connRef.current = conn;
@@ -288,21 +394,22 @@ export default function TeamGame({ onExit }) {
   }
 
   function finishPlacement(board) {
-    connRef.current?.relay({ t: 'board', cells: board.map((c) => c.pieceId) });
+    // Problema 3: tabuleiro completo só para o aliado; inimigos recebem apenas "pronto".
+    const ally = allyOf(state.myIndex, ta);
+    const enemies = enemiesOf(state.myIndex, ta);
+    connRef.current?.relay({ t: 'board', cells: board.map((c) => c.pieceId) }, ally);
+    connRef.current?.relay({ t: 'board-ready' }, enemies);
     dispatch({ type: 'placed', board });
   }
 
-  function handleAttack({ boardIdx, board, indices, hitsMade, anyHit, destroyed }) {
-    const ta = state.teamAssignment;
-    const targetPlayer = enemiesOf(state.myIndex, ta)[boardIdx];
-    connRef.current?.relay({ t: 'attack', targetPlayer, indices });
-    if (destroyed) sfx.destroyed();
-    dispatch({ type: 'i-attacked', targetPlayer, board, shotsFired: indices.length, hitsMade, anyHit });
+  // O atacante confirma a jogada já resolvida ao parent (aplica turno/estatísticas).
+  function handleAttackResolved({ targetPlayer, indices, hitIndices, destroyed, targetSunk }) {
+    dispatch({ type: 'apply-attack', fromPlayer: state.myIndex, targetPlayer, indices, hitIndices, destroyed, targetSunk });
   }
 
   function handleTimeout() {
-    connRef.current?.relay({ t: 'attack', targetPlayer: -1, indices: [] });
-    dispatch({ type: 'i-attacked', targetPlayer: -1, board: null, shotsFired: 0, hitsMade: 0, anyHit: false });
+    connRef.current?.relay({ t: 'timeout' });
+    dispatch({ type: 'apply-attack', fromPlayer: state.myIndex, targetPlayer: -1, indices: [], hitIndices: [] });
   }
 
   function requestRematch() {
@@ -319,7 +426,22 @@ export default function TeamGame({ onExit }) {
 
   const teamNames = { 0: t('team.teamA'), 1: t('team.teamB') };
 
+  // Banner de rede (problema 1): jogador caído ou eu tentando reconectar.
+  const netBanner =
+    state.reconnecting || state.oppDisconnected ? (
+      <div
+        style={{
+          position: 'fixed', top: 0, left: 0, right: 0, zIndex: 50,
+          padding: '8px 12px', textAlign: 'center', fontWeight: 600,
+          background: state.reconnecting ? '#8a5a00' : '#664200', color: '#fff',
+        }}
+      >
+        {state.reconnecting ? t('team.reconnecting') : t('team.oppDisconnected')}
+      </div>
+    ) : null;
+
   // ─── renders ──────────────────────────────────────────────────────────────
+  function renderStage() {
   if (stage === 'lobby') return (
     <div className="screen menu fade-in">
       <p className="tagline">
@@ -468,12 +590,17 @@ export default function TeamGame({ onExit }) {
         enemy1Name={pname(e1)}
         enemy0Board={pboard(e0)}
         enemy1Board={pboard(e1)}
+        enemyIndices={[e0, e1]}
         ownBoard={pboard(myIndex)}
         allyBoard={pboard(ally)}
         energy={state.energy}
-        onAttack={handleAttack}
+        onSendShot={sendShot}
+        onSendProbe={sendProbe}
+        onAttackResolved={handleAttackResolved}
         onSpendEnergy={(amount) => dispatch({ type: 'spend', amount })}
         onTimeout={handleTimeout}
+        shotResult={state.shotResult}
+        probeResult={state.probeResult}
       />
     );
   }
@@ -547,26 +674,12 @@ export default function TeamGame({ onExit }) {
   }
 
   return null;
-}
+  }
 
-// ─── Mini-tabuleiro ───────────────────────────────────────────────────────────
-function MiniBoard({ board, label, flash = [] }) {
-  const flashSet = new Set(flash);
   return (
-    <div className="own-side">
-      <div className="own-title">{label}</div>
-      <div className="grid own-grid" style={{ '--size': 8 }}>
-        {(board ?? []).map((cell, i) => {
-          const piece = cell.pieceId ? FLEET_MAP[cell.pieceId] : null;
-          const justHit = flashSet.has(i);
-          let cls = 'mini-cell';
-          let content = '';
-          if (piece && cell.shot) { cls += ` mini-hit${justHit ? ' pop' : ''}`; content = '💥'; }
-          else if (piece)          { cls += ' mini-piece'; content = piece.emoji; }
-          else if (cell.shot)      cls += ' mini-miss';
-          return <div key={i} className={cls}>{content}</div>;
-        })}
-      </div>
-    </div>
+    <>
+      {netBanner}
+      {renderStage()}
+    </>
   );
 }

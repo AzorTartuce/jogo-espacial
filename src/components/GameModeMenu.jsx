@@ -1,12 +1,6 @@
 import { sfx } from '../game/sound.js';
 import { useT } from '../i18n/index.jsx';
-
-const MODES = [
-  { id: 'classico', icon: '🎯' },
-  { id: 'ascensao', icon: '⚡' },
-  { id: 'instabilidade', icon: '🌀' },
-  { id: 'duelo', icon: '🏅' },
-];
+import { GAME_MODES as MODES } from '../game/constants.js';
 
 export default function GameModeMenu({ onSelect }) {
   const t = useT();

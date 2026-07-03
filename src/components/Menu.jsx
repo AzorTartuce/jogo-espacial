@@ -1,14 +1,7 @@
 import { useState } from 'react';
-import { FLEET, RADAR_COST, PLASMA_COST } from '../game/constants.js';
+import { FLEET, RADAR_COST, PLASMA_COST, MODE_ICONS } from '../game/constants.js';
 import { sfx } from '../game/sound.js';
 import { useT } from '../i18n/index.jsx';
-
-const MODE_ICONS = {
-  classico: '🎯',
-  ascensao: '⚡',
-  instabilidade: '🌀',
-  duelo: '🏅',
-};
 
 export default function Menu({ gameMode, onStart, onChangeMode }) {
   const t = useT();

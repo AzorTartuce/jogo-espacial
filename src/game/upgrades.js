@@ -39,6 +39,22 @@ export const UPGRADE_POOL = [
 
 export function getUpgradeChoices(pickedIds, count = 3) {
   const available = UPGRADE_POOL.filter((u) => !pickedIds.includes(u.id));
-  const shuffled = [...available].sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, Math.min(count, shuffled.length));
+  // Fisher-Yates: embaralhamento uniforme (o `available` já é uma cópia nova).
+  for (let i = available.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [available[i], available[j]] = [available[j], available[i]];
+  }
+  return available.slice(0, Math.min(count, available.length));
+}
+
+// Regra única: quando oferecer um upgrade (modo Duelo, a cada 3 turnos jogados,
+// enquanto ainda houver upgrades por adquirir). Compartilhada por LocalGame e
+// OnlineGame para as duas implementações não divergirem.
+export function shouldOfferUpgrade({ gameMode, turnsPlayed, pickedCount }) {
+  return (
+    gameMode === 'duelo' &&
+    turnsPlayed > 0 &&
+    turnsPlayed % 3 === 0 &&
+    pickedCount < UPGRADE_POOL.length
+  );
 }
