@@ -41,6 +41,9 @@ const initialState = {
   gameMode: 'ascensao',
   myUpgrades: [],
   myTurnsPlayed: 0,
+  // Geração do turno atual (bug #14): invalida handoffs atrasados (setTimeout de
+  // 1100ms) que ainda não dispararam quando um evento mais recente já mudou o turno.
+  turnToken: 0,
   // Resolução do defensor (problema 3): resultados de tiro/sondagem chegam aqui.
   shotResult: null,
   probeResult: null,
@@ -140,11 +143,19 @@ function reducer(s, a) {
         return { ...ns, winner: 'me', stage: 'gameover' };
       }
       if (!a.anyHit) {
-        return { ...ns, myTurnsPlayed: s.myTurnsPlayed + 1, pendingOppTurn: true };
+        return {
+          ...ns,
+          myTurnsPlayed: s.myTurnsPlayed + 1,
+          pendingOppTurn: true,
+          turnToken: s.turnToken + 1,
+        };
       }
       return ns;
     }
     case 'hand-over':
+      // Bug #14: se o turno já avançou por outro caminho desde que este handoff
+      // foi agendado (1100ms atrás), o token não bate mais — ignora (no-op).
+      if (a.token !== s.turnToken) return s;
       return {
         ...s,
         pendingOppTurn: false,
@@ -159,6 +170,8 @@ function reducer(s, a) {
         stage: 'defend',
         defendMsg: tr('online.yourTimeUp', { name: s.oppName }),
         defendFlash: [],
+        pendingOppTurn: false,
+        turnToken: s.turnToken + 1,
       };
 
     case 'attack-received': {
@@ -194,7 +207,9 @@ function reducer(s, a) {
       if (allFound(board)) {
         return { ...ns, winner: 'opp', stage: 'gameover' };
       }
-      if (hits === 0) return { ...ns, pendingMyTurn: true };
+      if (hits === 0) {
+        return { ...ns, pendingMyTurn: true, turnToken: s.turnToken + 1 };
+      }
       return ns;
     }
     case 'pass-received':
@@ -202,8 +217,11 @@ function reducer(s, a) {
         ...s,
         defendMsg: tr('online.oppTimeUp'),
         pendingMyTurn: true,
+        turnToken: s.turnToken + 1,
       };
     case 'take-turn': {
+      // Bug #14: mesmo guard do lado do defensor virando atacante.
+      if (a.token !== s.turnToken) return s;
       const stage = needsUpgrade(s) ? 'upgrade' : 'battle';
       return {
         ...s,
@@ -337,17 +355,23 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
     };
   }, []);
 
+  // Bug #14 (deadlock a partir da 2ª rodada): este handoff é atrasado de propósito
+  // (dá tempo da animação terminar), mas se o oponente já tiver iniciado a próxima
+  // rodada antes deste timer disparar, ele precisa virar no-op — daí o `turnToken`
+  // capturado agora e conferido no reducer no momento em que o timeout dispara.
   useEffect(() => {
     if (!state.pendingOppTurn) return;
-    const t = setTimeout(() => dispatch({ type: 'hand-over' }), 1100);
+    const token = state.turnToken;
+    const t = setTimeout(() => dispatch({ type: 'hand-over', token }), 1100);
     return () => clearTimeout(t);
-  }, [state.pendingOppTurn]);
+  }, [state.pendingOppTurn, state.turnToken]);
 
   useEffect(() => {
     if (!state.pendingMyTurn) return;
-    const t = setTimeout(() => dispatch({ type: 'take-turn' }), 1100);
+    const token = state.turnToken;
+    const t = setTimeout(() => dispatch({ type: 'take-turn', token }), 1100);
     return () => clearTimeout(t);
-  }, [state.pendingMyTurn]);
+  }, [state.pendingMyTurn, state.turnToken]);
 
   useEffect(() => {
     if (state.defendFlash.length === 0 || !state.ownBoard) return;
