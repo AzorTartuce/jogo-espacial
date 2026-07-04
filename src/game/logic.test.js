@@ -9,6 +9,8 @@ import {
   fire,
   allFound,
   radarScan,
+  resolveShots,
+  plasmaCells,
 } from './logic.js';
 import { SIZE, FLEET } from './constants.js';
 
@@ -109,6 +111,72 @@ describe('allFound', () => {
       board = fire(board, c).board;
     }
     expect(allFound(board)).toBe(true);
+  });
+});
+
+describe('resolveShots', () => {
+  it('resolves a single miss', () => {
+    const board = emptyBoard();
+    const result = resolveShots(board, [10]);
+    expect(result.hitIndices).toEqual([]);
+    expect(result.destroyed).toBeNull();
+    expect(result.sunkAll).toBe(true);
+    expect(result.board[10].shot).toBe(true);
+  });
+
+  it('resolves a single hit', () => {
+    let board = emptyBoard();
+    const piece = FLEET.find((p) => p.size >= 2);
+    const cells = canPlace(board, idx(0, 0), piece.size, true);
+    board = placePiece(board, piece.id, cells);
+    const result = resolveShots(board, [cells[0]]);
+    expect(result.hitIndices).toEqual([cells[0]]);
+    expect(result.destroyed).toBeNull();
+    expect(result.sunkAll).toBe(false);
+  });
+
+  it('resolves multiple shots in one call (e.g. plasma burst in a cross)', () => {
+    let board = emptyBoard();
+    const piece = FLEET.find((p) => p.size >= 2);
+    const cells = canPlace(board, idx(0, 0), piece.size, true);
+    board = placePiece(board, piece.id, cells);
+    const center = idx(0, 1);
+    const shots = plasmaCells(center);
+    const result = resolveShots(board, shots);
+    // cells[0] and cells[1] fall inside the piece's footprint along the cross
+    expect(result.hitIndices.length).toBeGreaterThan(0);
+    for (const i of shots) {
+      expect(result.board[i].shot).toBe(true);
+    }
+  });
+
+  it('reports destroyed when a full call sinks a piece', () => {
+    let board = emptyBoard();
+    const piece = FLEET.find((p) => p.size === 1) ?? FLEET[FLEET.length - 1];
+    const cells = canPlace(board, idx(0, 0), piece.size, true);
+    board = placePiece(board, piece.id, cells);
+    const result = resolveShots(board, cells);
+    expect(result.destroyed).not.toBeNull();
+    expect(result.destroyed.id).toBe(piece.id);
+    expect(result.destroyed.emoji).toBe(piece.emoji);
+  });
+
+  it('reports sunkAll true once every piece on the board has been destroyed', () => {
+    const board = emptyBoard();
+    const piece = FLEET.find((p) => p.size >= 2);
+    const cells = canPlace(board, idx(0, 0), piece.size, true);
+    const placed = placePiece(board, piece.id, cells);
+    const result = resolveShots(placed, cells);
+    expect(result.sunkAll).toBe(true);
+    expect(result.destroyed).not.toBeNull();
+  });
+
+  it('skips already-shot cells without affecting the result', () => {
+    const board = emptyBoard();
+    const first = resolveShots(board, [5]);
+    const second = resolveShots(first.board, [5, 6]);
+    expect(second.hitIndices).toEqual([]);
+    expect(second.board[6].shot).toBe(true);
   });
 });
 

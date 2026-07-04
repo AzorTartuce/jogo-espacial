@@ -1,6 +1,6 @@
 import { useReducer, useRef, useEffect, useState, useCallback } from 'react';
 import { ENERGY_PER_TURN } from '../game/constants.js';
-import { fire, allFound, emptyBoard } from '../game/logic.js';
+import { resolveShots, emptyBoard } from '../game/logic.js';
 import { sfx } from '../game/sound.js';
 import { shouldOfferUpgrade } from '../game/upgrades.js';
 import { createConnection } from '../online/connection.js';
@@ -10,6 +10,14 @@ import BattleScreen from './BattleScreen.jsx';
 import DefendScreen from './DefendScreen.jsx';
 import UpgradeScreen from './UpgradeScreen.jsx';
 import GameOver from './GameOver.jsx';
+import QuickMatchLobby from './QuickMatchLobby.jsx';
+import RoomLobby from './RoomLobby.jsx';
+import HostingScreen from './HostingScreen.jsx';
+import SearchingScreen from './SearchingScreen.jsx';
+import WaitModeScreen from './WaitModeScreen.jsx';
+import WaitBoardsScreen from './WaitBoardsScreen.jsx';
+import NetBanner from './NetBanner.jsx';
+import MatchFoundBanner from './MatchFoundBanner.jsx';
 
 const ONLINE_MODES = [
   { id: 'classico',      icon: '🎯' },
@@ -47,6 +55,11 @@ export const initialState = {
   // Resolução do defensor (problema 3): resultados de tiro/sondagem chegam aqui.
   shotResult: null,
   probeResult: null,
+  // Instabilidade sincronizada: evento sorteado pelo ATACANTE e retransmitido
+  // via rede. Este jogador nunca sorteia o seu próprio quando é o defensor —
+  // só recebe e exibe este campo (ver BattleScreen `onSendEvent` / DefendScreen
+  // `incomingEvent`). Mesmo padrão de `id` incremental de shotResult/probeResult.
+  incomingEvent: null,
   // Estado de rede (problema 1): oponente caído / eu reconectando.
   oppDisconnected: false,
   reconnecting: false,
@@ -131,6 +144,13 @@ export function reducer(s, a) {
         ...s,
         probeResult: { id: (s.probeResult?.id || 0) + 1, cells: a.cells },
       };
+    case 'event-received':
+      // Só o defensor recebe isto (o atacante já aplicou o evento localmente
+      // ao sorteá-lo) — guarda com `id` incremental pro mesmo padrão de dedupe.
+      return {
+        ...s,
+        incomingEvent: { id: (s.incomingEvent?.id || 0) + 1, event: a.event },
+      };
 
     case 'i-attacked': {
       const ns = {
@@ -164,6 +184,10 @@ export function reducer(s, a) {
         stage: 'defend',
         defendMsg: tr('online.oppTurnHold', { name: s.oppName }),
         defendFlash: [],
+        // Um novo DefendScreen vai montar aqui com seu próprio lastEventId
+        // zerado; sem isto, um incomingEvent de várias rodadas atrás (id>0)
+        // seria reexibido sozinho no mount (mesmo raciocínio do bug #15).
+        incomingEvent: null,
       };
     case 'i-timeout':
       return {
@@ -177,17 +201,8 @@ export function reducer(s, a) {
       };
 
     case 'attack-received': {
-      let board = s.ownBoard;
-      let hits = 0;
-      let destroyed = null;
-      for (const i of a.indices) {
-        const result = fire(board, i);
-        if (result) {
-          board = result.board;
-          if (result.hit) hits++;
-          if (result.destroyed) destroyed = result.destroyed;
-        }
-      }
+      const { board, hitIndices, destroyed, sunkAll } = resolveShots(s.ownBoard, a.indices);
+      const hits = hitIndices.length;
       let msg;
       if (destroyed) {
         msg = tr('online.foundYour', { emoji: destroyed.emoji, name: tr(`fleet.${destroyed.id}`) });
@@ -206,7 +221,7 @@ export function reducer(s, a) {
           hits: s.oppStats.hits + hits,
         },
       };
-      if (allFound(board)) {
+      if (sunkAll) {
         return { ...ns, winner: 'opp', stage: 'gameover' };
       }
       if (hits === 0) {
@@ -236,6 +251,10 @@ export function reducer(s, a) {
         // é reaplicado automaticamente no mount, encerrando o turno novo sozinho.
         shotResult: null,
         probeResult: null,
+        // Mesmo raciocínio para o incomingEvent de quando este jogador foi
+        // defensor pela última vez — não faz sentido carregar para o turno em
+        // que ele agora é o atacante.
+        incomingEvent: null,
       };
     }
 
@@ -301,6 +320,7 @@ export function reducer(s, a) {
           // (id>0) sobrevive e é reaplicado assim que o BattleScreen remontar.
           shotResult: null,
           probeResult: null,
+          incomingEvent: null,
         };
       }
       return ns;
@@ -332,7 +352,17 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
   const [state, dispatch] = useReducer(reducer, initialState);
   const [codeInput, setCodeInput] = useState('');
   const [connecting, setConnecting] = useState(false);
+  // Problema 2: aviso transitório de que um pareamento chegou logo depois de o
+  // usuário ter pedido para cancelar a busca (corrida com o servidor).
+  const [matchFoundAfterCancel, setMatchFoundAfterCancel] = useState(false);
   const connRef = useRef(null);
+  // Guarda síncrona (problema 3): impede que um duplo-clique muito rápido (antes
+  // do próximo render aplicar `disabled`) dispare getConnection() duas vezes e
+  // crie duas conexões WebSocket físicas.
+  const connectingRef = useRef(false);
+  // Cancelamento de busca (problema 2): marca que o usuário já pediu para
+  // cancelar, para o caso de um 'match-found' chegar logo depois.
+  const cancelRequestedRef = useRef(false);
   const gameModeRef = useRef(state.gameMode);
   useEffect(() => { gameModeRef.current = state.gameMode; }, [state.gameMode]);
   // Meu tabuleiro atual, acessível dentro dos handlers de rede (defensor resolve aqui).
@@ -342,21 +372,14 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
   // Callbacks estáveis para o BattleScreen enviar tiros/sondagens ao defensor.
   const sendShot = useCallback((indices) => connRef.current?.relay({ t: 'attack', indices }), []);
   const sendProbe = useCallback((cells) => connRef.current?.relay({ t: 'probe', cells }), []);
+  // Instabilidade: retransmite ao defensor o evento que este atacante sorteou.
+  const sendEvent = useCallback((event) => connRef.current?.relay({ t: 'event', event }), []);
 
   // Defensor: resolve tiros no próprio tabuleiro e devolve só o resultado.
   function resolveAttack(indices) {
-    let board = ownBoardRef.current || emptyBoard();
-    const hitIndices = [];
-    let destroyed = null;
-    for (const i of indices) {
-      const r = fire(board, i);
-      if (r) {
-        board = r.board;
-        if (r.hit) hitIndices.push(i);
-        if (r.destroyed) destroyed = { id: r.destroyed.id, emoji: r.destroyed.emoji };
-      }
-    }
-    return { hitIndices, destroyed, sunkAll: allFound(board) };
+    const board = ownBoardRef.current || emptyBoard();
+    const { hitIndices, destroyed, sunkAll } = resolveShots(board, indices);
+    return { hitIndices, destroyed, sunkAll };
   }
 
   useEffect(() => {
@@ -400,6 +423,14 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
     else sfx.lose();
   }, [state.stage, state.winner]);
 
+  // Problema 2: some com o aviso de "pareamento após cancelamento" sozinho
+  // depois de um tempo, sem exigir nenhuma ação do jogador.
+  useEffect(() => {
+    if (!matchFoundAfterCancel) return;
+    const t = setTimeout(() => setMatchFoundAfterCancel(false), 5000);
+    return () => clearTimeout(t);
+  }, [matchFoundAfterCancel]);
+
   async function getConnection() {
     if (connRef.current) return connRef.current;
     const conn = createConnection();
@@ -418,6 +449,16 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
     conn.on('searching', () => dispatch({ type: 'searching' }));
     conn.on('match-found', (m) => {
       conn.setReconnect({ code: m.code, playerIndex: m.playerIndex, token: m.token });
+      // Problema 2: se o usuário já tinha clicado em "cancelar busca" (a UI já
+      // voltou pro lobby de forma otimista) e o servidor pareou mesmo assim
+      // antes de processar o cancelamento, é mais simples e seguro deixar o
+      // jogador entrar na partida (já que foi pareado de verdade) do que tentar
+      // "descancelar" escondido — só avisamos com uma mensagem transitória em
+      // vez de deixar a tela "puxar" o jogador de volta sem explicação.
+      if (cancelRequestedRef.current) {
+        cancelRequestedRef.current = false;
+        setMatchFoundAfterCancel(true);
+      }
       dispatch({ type: 'match-found', code: m.code, playerIndex: m.playerIndex, oppName: m.oppName });
       // Quem entrou primeiro na fila (índice 0) define o modo para os dois.
       if (m.playerIndex === 0) conn.relay({ t: 'mode', mode: gameModeRef.current });
@@ -443,6 +484,9 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
       if (d.t === 'mode') dispatch({ type: 'set-mode', mode: d.mode });
       if (d.t === 'pass') dispatch({ type: 'pass-received' });
       if (d.t === 'rematch') dispatch({ type: 'rematch-opp' });
+      // Instabilidade: só o defensor recebe isto — o atacante já aplicou o
+      // evento localmente ao sorteá-lo (ver BattleScreen `onSendEvent`).
+      if (d.t === 'event') dispatch({ type: 'event-received', event: d.event });
       // Defensor: resolve o tiro e devolve o resultado ao atacante.
       if (d.t === 'attack') {
         const res = resolveAttack(d.indices);
@@ -479,6 +523,11 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
   }
 
   async function withConnection(fn) {
+    // Guarda síncrona: `setConnecting(true)` só reflete no `disabled` do botão
+    // no próximo render, então um duplo-clique rápido passaria pela checagem de
+    // `connRef.current` (ainda null) duas vezes. O ref abaixo é síncrono.
+    if (connectingRef.current) return;
+    connectingRef.current = true;
     setConnecting(true);
     dispatch({ type: 'error', message: '' });
     try {
@@ -487,6 +536,7 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
     } catch {
       dispatch({ type: 'error', message: t('online.connectFail') });
     } finally {
+      connectingRef.current = false;
       setConnecting(false);
     }
   }
@@ -510,12 +560,18 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
 
   function findMatch() {
     sfx.click();
+    cancelRequestedRef.current = false;
     withConnection((conn) =>
       conn.send({ type: 'quick-match', name: state.myName || t('online.defaultAstronaut'), mode: state.gameMode })
     );
   }
 
   function cancelSearch() {
+    // Guarda síncrona (problema 2): ignora cliques duplicados no botão de
+    // cancelar antes do próximo render; também marca para o handler de
+    // 'match-found' que um cancelamento já estava em andamento.
+    if (cancelRequestedRef.current) return;
+    cancelRequestedRef.current = true;
     sfx.click();
     connRef.current?.send({ type: 'cancel-match' });
     dispatch({ type: 'cancel-search' });
@@ -545,154 +601,62 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
   const { stage } = state;
 
   // Banner de rede (problema 1): oponente caído ou eu tentando reconectar.
-  const netBanner =
-    state.reconnecting || state.oppDisconnected ? (
-      <div
-        style={{
-          position: 'fixed', top: 0, left: 0, right: 0, zIndex: 50,
-          padding: '8px 12px', textAlign: 'center', fontWeight: 600,
-          background: state.reconnecting ? '#8a5a00' : '#664200', color: '#fff',
-        }}
-      >
-        {state.reconnecting ? t('online.reconnecting') : t('online.oppDisconnected')}
-      </div>
-    ) : null;
+  const netBanner = (
+    <NetBanner
+      reconnecting={state.reconnecting}
+      oppDisconnected={state.oppDisconnected}
+      reconnectingText={t('online.reconnecting')}
+      disconnectedText={t('online.oppDisconnected')}
+    />
+  );
+
+  // Problema 2: pareamento chegou logo após o jogador ter cancelado a busca.
+  const matchFoundBanner = (
+    <MatchFoundBanner show={matchFoundAfterCancel} text={t('online.matchFoundAfterCancel')} />
+  );
 
   function renderStage() {
   if (stage === 'lobby' && quickMatch) {
     return (
-      <div className="screen menu fade-in">
-        <p className="tagline">
-          {t('online.quickTagline1')}
-          <br />
-          {t('online.quickTagline2')}
-        </p>
-
-        {state.error && <div className="error-box">{state.error}</div>}
-
-        <input
-          className="lobby-input"
-          placeholder={t('online.yourName')}
-          maxLength={14}
-          value={state.myName}
-          onChange={(e) => dispatch({ type: 'set-name', name: e.target.value })}
-        />
-
-        <div className="lobby-panels">
-          <div className="lobby-panel">
-            <h3>{t('online.chooseMode')}</h3>
-            <div className="online-mode-selector">
-              {ONLINE_MODES.map((m) => (
-                <button
-                  key={m.id}
-                  className={`online-mode-chip ${state.gameMode === m.id ? 'active' : ''}`}
-                  onClick={() => { sfx.click(); dispatch({ type: 'set-mode', mode: m.id }); }}
-                >
-                  {m.icon} {modeTitle(m.id)}
-                </button>
-              ))}
-            </div>
-            <p className="online-join-hint">
-              {t('online.quickHint')}
-            </p>
-            <button className="big-btn" onClick={findMatch} disabled={connecting}>
-              {t('online.searchBtn')}
-            </button>
-          </div>
-        </div>
-      </div>
+      <QuickMatchLobby
+        error={state.error}
+        myName={state.myName}
+        onNameChange={(name) => dispatch({ type: 'set-name', name })}
+        gameMode={state.gameMode}
+        modes={ONLINE_MODES}
+        modeTitle={modeTitle}
+        onSelectMode={(id) => { sfx.click(); dispatch({ type: 'set-mode', mode: id }); }}
+        onFindMatch={findMatch}
+        connecting={connecting}
+      />
     );
   }
 
   if (stage === 'lobby') {
     return (
-      <div className="screen menu fade-in">
-        <p className="tagline">
-          {t('online.createTagline1')}
-          <br />
-          {t('online.createTagline2')}
-        </p>
-
-        {state.error && <div className="error-box">{state.error}</div>}
-
-        <input
-          className="lobby-input"
-          placeholder={t('online.yourName')}
-          maxLength={14}
-          value={state.myName}
-          onChange={(e) => dispatch({ type: 'set-name', name: e.target.value })}
-        />
-
-        <div className="lobby-panels">
-          <div className="lobby-panel">
-            <h3>{t('online.createRoomH')}</h3>
-            <p>{t('online.createRoomP')}</p>
-            <div className="online-mode-selector">
-              {ONLINE_MODES.map((m) => (
-                <button
-                  key={m.id}
-                  className={`online-mode-chip ${state.gameMode === m.id ? 'active' : ''}`}
-                  onClick={() => { sfx.click(); dispatch({ type: 'set-mode', mode: m.id }); }}
-                >
-                  {m.icon} {modeTitle(m.id)}
-                </button>
-              ))}
-            </div>
-            <button className="big-btn" onClick={createRoom} disabled={connecting}>
-              {t('online.createBtn')}
-            </button>
-          </div>
-
-          <div className="lobby-panel">
-            <h3>{t('online.joinH')}</h3>
-            <p className="online-join-hint">{t('online.joinHint')}</p>
-            <input
-              className="lobby-input code-input"
-              placeholder={t('online.codePh')}
-              maxLength={4}
-              value={codeInput}
-              onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
-            />
-            <button
-              className="big-btn"
-              onClick={joinRoom}
-              disabled={connecting || codeInput.trim().length !== 4}
-            >
-              {t('online.joinBtn')}
-            </button>
-          </div>
-        </div>
-      </div>
+      <RoomLobby
+        error={state.error}
+        myName={state.myName}
+        onNameChange={(name) => dispatch({ type: 'set-name', name })}
+        gameMode={state.gameMode}
+        modes={ONLINE_MODES}
+        modeTitle={modeTitle}
+        onSelectMode={(id) => { sfx.click(); dispatch({ type: 'set-mode', mode: id }); }}
+        onCreateRoom={createRoom}
+        onJoinRoom={joinRoom}
+        connecting={connecting}
+        codeInput={codeInput}
+        onCodeInputChange={setCodeInput}
+      />
     );
   }
 
   if (stage === 'hosting') {
-    return (
-      <div className="screen pass fade-in">
-        <div className="pass-icon">📡</div>
-        <h2>{t('online.roomCreated')}</h2>
-        <div className="room-code">{state.code}</div>
-        <p>
-          {t('online.shareInstr1')}{' '}
-          <span className="highlight">{location.host}</span>{' '}
-          {t('online.shareInstr2')}
-        </p>
-        <p className="waiting-dots">{t('online.waitingOpp')}</p>
-      </div>
-    );
+    return <HostingScreen code={state.code} />;
   }
 
   if (stage === 'searching') {
-    return (
-      <div className="screen pass fade-in">
-        <div className="pass-icon">🛰️</div>
-        <h2>{t('online.searchingH')}</h2>
-        <p className="waiting-dots">{t('online.searchingP')}</p>
-        <button className="small-btn" onClick={cancelSearch}>
-          {t('online.cancelSearch')}
-        </button>
-      </div>
-    );
+    return <SearchingScreen onCancelSearch={cancelSearch} />;
   }
 
   if (stage === 'placement') {
@@ -705,25 +669,11 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
   }
 
   if (stage === 'waitMode') {
-    return (
-      <div className="screen pass fade-in">
-        <div className="pass-icon">🛰️</div>
-        <h2>{t('online.joinedRoom')}</h2>
-        <p className="waiting-dots">{t('online.waitingMode')}</p>
-      </div>
-    );
+    return <WaitModeScreen />;
   }
 
   if (stage === 'waitBoards') {
-    return (
-      <div className="screen pass fade-in">
-        <div className="pass-icon">🧑‍🚀</div>
-        <h2>{t('online.teamHidden')}</h2>
-        <p className="waiting-dots">
-          {t('online.waitOppHide', { name: state.oppName || t('online.theOpponent') })}
-        </p>
-      </div>
-    );
+    return <WaitBoardsScreen oppName={state.oppName} />;
   }
 
   if (stage === 'upgrade') {
@@ -754,6 +704,7 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
         onSendProbe={sendProbe}
         shotResult={state.shotResult}
         probeResult={state.probeResult}
+        onSendEvent={sendEvent}
       />
     );
   }
@@ -765,6 +716,7 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
         ownBoard={state.ownBoard}
         message={state.defendMsg}
         flash={state.defendFlash}
+        incomingEvent={state.incomingEvent}
       />
     );
   }
@@ -799,6 +751,7 @@ export default function OnlineGame({ onExit, quickMatch = false }) {
   return (
     <>
       {netBanner}
+      {matchFoundBanner}
       {renderStage()}
     </>
   );

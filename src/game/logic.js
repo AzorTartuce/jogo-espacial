@@ -91,6 +91,23 @@ export function allFound(board) {
   return board.every((c) => !c.pieceId || c.shot);
 }
 
+// Resolve uma lista de tiros num tabuleiro, retornando o tabuleiro atualizado
+// e um resumo do resultado (usado por todos os fluxos de jogo — local e online).
+export function resolveShots(board, indices) {
+  let b = board;
+  const hitIndices = [];
+  let destroyed = null;
+  for (const i of indices) {
+    const r = fire(b, i);
+    if (r) {
+      b = r.board;
+      if (r.hit) hitIndices.push(i);
+      if (r.destroyed) destroyed = { id: r.destroyed.id, emoji: r.destroyed.emoji };
+    }
+  }
+  return { board: b, hitIndices, destroyed, sunkAll: allFound(b) };
+}
+
 // Revela área (2*radius+1)² ao redor do centro (radar)
 export function radarScan(board, center, radius = 1) {
   const [row, col] = rowCol(center);

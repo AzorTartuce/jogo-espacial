@@ -1,12 +1,19 @@
 import { useReducer, useRef, useEffect, useState, useCallback } from 'react';
 import { ENERGY_PER_TURN } from '../game/constants.js';
-import { fire, allFound, emptyBoard } from '../game/logic.js';
-import { sfx } from '../game/sound.js';
+import { resolveShots, emptyBoard } from '../game/logic.js';
+import { sfx, playEventSound } from '../game/sound.js';
 import { createConnection } from '../online/connection.js';
 import { useT, tr } from '../i18n/index.jsx';
 import PlacementScreen from './PlacementScreen.jsx';
 import TeamBattleScreen from './TeamBattleScreen.jsx';
-import MiniBoard from './MiniBoard.jsx';
+import NetBanner from './NetBanner.jsx';
+import TeamLobby from './TeamLobby.jsx';
+import TeamWaitingRoom from './TeamWaitingRoom.jsx';
+import TeamSelectScreen from './TeamSelectScreen.jsx';
+import TeamWaitPlacementScreen from './TeamWaitPlacementScreen.jsx';
+import AllyAttackingScreen from './AllyAttackingScreen.jsx';
+import TeamDefendScreen from './TeamDefendScreen.jsx';
+import TeamGameOver from './TeamGameOver.jsx';
 
 // Sentinela: o atacante marca um acerto sem jamais conhecer a peça real do inimigo.
 const HIT_PIECE = '__hit__';
@@ -58,6 +65,13 @@ export const init = {
   probeResult: null,   // resolução de sondagem devolvida pelo defensor
   oppDisconnected: false, // problema 1: alguém caiu, aguardando reconexão
   reconnecting: false,    // problema 1: eu tentando reconectar
+  // Instabilidade sincronizada: evento sorteado por quem está atacando e
+  // retransmitido a todos os outros da sala. Ninguém além do atacante sorteia
+  // o seu próprio evento — os demais só recebem e exibem este campo (id
+  // incremental, mesmo padrão de shotResult/probeResult). Hoje o 2v2 ainda não
+  // tem um modo Instabilidade que dispare isto (ver TeamBattleScreen), mas o
+  // canal de sincronização já fica pronto para quando existir.
+  incomingEvent: null,
 };
 
 function cellsToBoard(cells) {
@@ -153,6 +167,16 @@ export function reducer(s, a) {
           id: (s.probeResult?.id || 0) + 1,
           targetPlayer: a.targetPlayer,
           cells: a.cells,
+        },
+      };
+    case 'event-received':
+      // Recebido por todos exceto quem sorteou (que já aplicou localmente).
+      return {
+        ...s,
+        incomingEvent: {
+          id: (s.incomingEvent?.id || 0) + 1,
+          event: a.event,
+          fromPlayer: a.fromPlayer,
         },
       };
 
@@ -271,6 +295,7 @@ export function reducer(s, a) {
           sunk: {},
           shotResult: null,
           probeResult: null,
+          incomingEvent: null,
         };
       }
       return { ...s, rematchVotes: votes };
@@ -294,6 +319,10 @@ export default function TeamGame({ onExit }) {
   const [codeInput, setCodeInput] = useState('');
   const [connecting, setConnecting] = useState(false);
   const connRef = useRef(null);
+  // Guarda síncrona (problema 3): impede duplo-clique rápido em criar/entrar
+  // (antes do próximo render aplicar `disabled`) de disparar getConn() duas
+  // vezes e abrir duas conexões WebSocket físicas.
+  const connectingRef = useRef(false);
   // Refs para os handlers de rede (que rodam fora do fluxo de render).
   const myIndexRef = useRef(state.myIndex);
   const taRef = useRef(state.teamAssignment);
@@ -308,18 +337,9 @@ export default function TeamGame({ onExit }) {
 
   // Defensor: resolve tiros no próprio tabuleiro e devolve só o resultado.
   function resolveAttack(indices) {
-    let board = ownBoardRef.current || emptyBoard();
-    const hitIndices = [];
-    let destroyed = null;
-    for (const i of indices) {
-      const r = fire(board, i);
-      if (r) {
-        board = r.board;
-        if (r.hit) hitIndices.push(i);
-        if (r.destroyed) destroyed = { id: r.destroyed.id, emoji: r.destroyed.emoji };
-      }
-    }
-    return { hitIndices, destroyed, sunkAll: allFound(board) };
+    const board = ownBoardRef.current || emptyBoard();
+    const { hitIndices, destroyed, sunkAll } = resolveShots(board, indices);
+    return { hitIndices, destroyed, sunkAll };
   }
 
   useEffect(() => () => { connRef.current?.close(); connRef.current = null; }, []);
@@ -332,6 +352,22 @@ export default function TeamGame({ onExit }) {
     if (hit) sfx.hit(); else sfx.miss();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.defendFlash]);
+
+  // Instabilidade sincronizada: exibe/soa o mesmo evento que o atacante sorteou
+  // e retransmitiu, tanto para o defensor quanto para o aliado do atacante.
+  // Este ref vive no componente TeamGame (que nunca remonta entre turnos), ao
+  // contrário de lastShotId/lastProbeId que ficam em TeamBattleScreen — por
+  // isso aqui não é preciso zerar incomingEvent em pontos específicos do
+  // reducer para evitar replay: o ref já garante que cada id só é processado
+  // uma vez durante toda a partida.
+  const [activeEvent, setActiveEvent] = useState(null);
+  const lastEventId = useRef(0);
+  useEffect(() => {
+    if (!state.incomingEvent || state.incomingEvent.id === lastEventId.current) return;
+    lastEventId.current = state.incomingEvent.id;
+    setActiveEvent(state.incomingEvent.event);
+    playEventSound(state.incomingEvent.event.id);
+  }, [state.incomingEvent]);
 
   async function getConn() {
     if (connRef.current) return connRef.current;
@@ -356,6 +392,8 @@ export default function TeamGame({ onExit }) {
       if (d.t === 'board-ready') dispatch({ type: 'board-received', fromPlayer: from, fog: true });
       if (d.t === 'rematch')     dispatch({ type: 'rematch-vote',   playerIndex: from });
       if (d.t === 'team-pick')   dispatch({ type: 'pick-team',      playerIndex: d.playerIndex, team: d.team });
+      // Instabilidade: recebido por todos exceto quem sorteou o evento.
+      if (d.t === 'event')       dispatch({ type: 'event-received', event: d.event, fromPlayer: from });
 
       // Timeout do atacante: repassado a todos, sem resolução de tabuleiro.
       if (d.t === 'timeout') {
@@ -394,11 +432,13 @@ export default function TeamGame({ onExit }) {
   }
 
   async function withConn(fn) {
+    if (connectingRef.current) return;
+    connectingRef.current = true;
     setConnecting(true);
     dispatch({ type: 'error', message: '' });
     try { fn(await getConn()); }
     catch { dispatch({ type: 'error', message: t('team.connectFail') }); }
-    finally { setConnecting(false); }
+    finally { connectingRef.current = false; setConnecting(false); }
   }
 
   function createRoom() { sfx.click(); withConn((c) => c.send({ type: 'create-team', name: state.myName || t('menu.defaultP1') })); }
@@ -444,130 +484,43 @@ export default function TeamGame({ onExit }) {
   const teamNames = { 0: t('team.teamA'), 1: t('team.teamB') };
 
   // Banner de rede (problema 1): jogador caído ou eu tentando reconectar.
-  const netBanner =
-    state.reconnecting || state.oppDisconnected ? (
-      <div
-        style={{
-          position: 'fixed', top: 0, left: 0, right: 0, zIndex: 50,
-          padding: '8px 12px', textAlign: 'center', fontWeight: 600,
-          background: state.reconnecting ? '#8a5a00' : '#664200', color: '#fff',
-        }}
-      >
-        {state.reconnecting ? t('team.reconnecting') : t('team.oppDisconnected')}
-      </div>
-    ) : null;
+  const netBanner = (
+    <NetBanner
+      reconnecting={state.reconnecting}
+      oppDisconnected={state.oppDisconnected}
+      reconnectingText={t('team.reconnecting')}
+      disconnectedText={t('team.oppDisconnected')}
+    />
+  );
 
   // ─── renders ──────────────────────────────────────────────────────────────
   function renderStage() {
   if (stage === 'lobby') return (
-    <div className="screen menu fade-in">
-      <p className="tagline">
-        <strong>{t('team.lobbyTaglineStrong')}</strong> {t('team.lobbyTagline1')}
-        <br />
-        {t('team.lobbyTagline2')}
-      </p>
-      {state.error && <div className="error-box">{state.error}</div>}
-      <input className="lobby-input" placeholder={t('team.yourName')} maxLength={14}
-        value={state.myName} onChange={(e) => dispatch({ type: 'set-name', name: e.target.value })} />
-      <div className="lobby-panels">
-        <div className="lobby-panel">
-          <h3>{t('team.createH')}</h3>
-          <p>{t('team.createP')}</p>
-          <button className="big-btn" onClick={createRoom} disabled={connecting}>{t('team.createBtn')}</button>
-        </div>
-        <div className="lobby-panel">
-          <h3>{t('team.joinH')}</h3>
-          <input className="lobby-input code-input" placeholder={t('team.codePh')} maxLength={4}
-            value={codeInput} onChange={(e) => setCodeInput(e.target.value.toUpperCase())} />
-          <button className="big-btn" onClick={joinRoom}
-            disabled={connecting || codeInput.trim().length !== 4}>{t('team.joinBtn')}</button>
-        </div>
-      </div>
-    </div>
+    <TeamLobby
+      error={state.error}
+      myName={state.myName}
+      onNameChange={(name) => dispatch({ type: 'set-name', name })}
+      onCreateRoom={createRoom}
+      onJoinRoom={joinRoom}
+      connecting={connecting}
+      codeInput={codeInput}
+      onCodeInputChange={setCodeInput}
+    />
   );
 
   if (stage === 'waiting') return (
-    <div className="screen pass fade-in">
-      <div className="pass-icon">👥</div>
-      <h2>{t('team.roomCreatedCode')} <span className="highlight">{code}</span></h2>
-      <p>{t('team.shareSeq')}</p>
-      <div className="team-waiting-grid">
-        {[0, 1].map((team) => (
-          <div key={team} className="team-waiting-panel">
-            <div className={`team-label-${team === 0 ? 'a' : 'b'}`}>{teamNames[team]}</div>
-            {[0, 1].map((slot) => {
-              const pi = team * 2 + slot;
-              const filled = !!players[pi];
-              return (
-                <div key={pi} className={`team-slot ${filled ? 'team-slot-filled' : ''}`}>
-                  {filled ? `✓ ${players[pi]}` : t('team.waitingSlot', { n: slot + 1 })}
-                </div>
-              );
-            })}
-          </div>
-        ))}
-      </div>
-      <p className="waiting-dots">{t('team.waiting4')}</p>
-    </div>
+    <TeamWaitingRoom code={code} players={players} teamNames={teamNames} />
   );
 
   if (stage === 'teamSelect') {
-    const choices  = state.teamChoices;
-    const myChoice = choices[myIndex];
-    const countA   = Object.values(choices).filter((t) => t === 0).length;
-    const countB   = Object.values(choices).filter((t) => t === 1).length;
-    const allReady = countA === 2 && countB === 2;
-
     return (
-      <div className="screen menu fade-in">
-        <h2>{t('team.chooseTeam')}</h2>
-        <p className="tagline">{t('team.eachNeeds2')}</p>
-
-        <div className="team-select-layout">
-          {[0, 1].map((team) => {
-            const label   = teamNames[team];
-            const count   = team === 0 ? countA : countB;
-            const isMine  = myChoice === team;
-            const isFull  = count >= 2 && !isMine;
-            const colorKey = team === 0 ? 'a' : 'b';
-
-            return (
-              <div key={team} className={`team-select-panel team-select-panel-${colorKey}${isMine ? ' team-select-mine' : ''}`}>
-                <div className={`team-label-${colorKey}`}>{label} ({count}/2)</div>
-
-                {players.map((name, pi) =>
-                  choices[pi] === team ? (
-                    <div key={pi} className="team-slot team-slot-filled">
-                      {pi === myIndex ? `✓ ${name} (${t('team.you')})` : `✓ ${name}`}
-                    </div>
-                  ) : null
-                )}
-
-                {Array.from({ length: 2 - count }).map((_, i) => (
-                  <div key={i} className="team-slot">{t('team.waitingEllipsis')}</div>
-                ))}
-
-                <button
-                  className="big-btn"
-                  disabled={isMine || isFull}
-                  onClick={() => pickTeam(team)}
-                  style={isMine ? { opacity: 0.55, cursor: 'default' } : {}}
-                >
-                  {isMine ? t('team.youAreHere') : t('team.joinTeam', { team: label })}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-
-        {allReady ? (
-          <p className="waiting-dots">{t('team.teamsReady')}</p>
-        ) : (
-          <p className="team-select-hint">
-            {t('team.chosenCount', { n: Object.keys(choices).length })}
-          </p>
-        )}
-      </div>
+      <TeamSelectScreen
+        myIndex={myIndex}
+        players={players}
+        teamChoices={state.teamChoices}
+        teamNames={teamNames}
+        onPickTeam={pickTeam}
+      />
     );
   }
 
@@ -587,13 +540,7 @@ export default function TeamGame({ onExit }) {
 
   if (stage === 'waitPlacement') {
     const readyCount = Object.keys(boards).length;
-    return (
-      <div className="screen pass fade-in">
-        <div className="pass-icon">🧑‍🚀</div>
-        <h2>{t('team.teamHidden')}</h2>
-        <p className="waiting-dots">{t('team.waitOthers', { n: readyCount })}</p>
-      </div>
-    );
+    return <TeamWaitPlacementScreen readyCount={readyCount} />;
   }
 
   if (stage === 'battle') {
@@ -625,15 +572,16 @@ export default function TeamGame({ onExit }) {
   if (stage === 'allyAttacking') {
     const ally = allyOf(myIndex, ta);
     return (
-      <div className="screen battle fade-in">
-        <h2><span className="highlight">{pname(ally)}</span> {t('team.allyAttacking')}</h2>
-        <div className="message">{state.allyMsg || t('team.partnerAttacking')}</div>
-        <div className="team-mini-boards">
-          <MiniBoard board={pboard(myIndex)} label={`${pname(myIndex)} (${t('team.you')})`}   flash={state.allyFlash} />
-          <MiniBoard board={pboard(ally)}    label={`${pname(ally)} (${t('team.partner')})`}  flash={[]} />
-        </div>
-        <p className="waiting-dots">{t('team.waitPartnerAttack')}</p>
-      </div>
+      <AllyAttackingScreen
+        activeEvent={activeEvent}
+        onEventDone={() => setActiveEvent(null)}
+        allyName={pname(ally)}
+        allyMsg={state.allyMsg}
+        myName={pname(myIndex)}
+        myBoard={pboard(myIndex)}
+        allyBoard={pboard(ally)}
+        allyFlash={state.allyFlash}
+      />
     );
   }
 
@@ -642,15 +590,19 @@ export default function TeamGame({ onExit }) {
     const ally = allyOf(myIndex, ta);
     const attackerTeamName = teamNames[teamOf(ca, ta)];
     return (
-      <div className="screen battle fade-in">
-        <h2>{attackerTeamName} — <span className="highlight">{pname(ca)}</span> {t('team.attackerAttacks')}</h2>
-        <div className="message">{state.defendMsg || t('team.holdFirm')}</div>
-        <div className="team-mini-boards">
-          <MiniBoard board={pboard(myIndex)} label={`${pname(myIndex)} (${t('team.you')})`}  flash={state.defendFlash} />
-          <MiniBoard board={pboard(ally)}    label={`${pname(ally)} (${t('team.partner')})`} flash={state.allyFlash} />
-        </div>
-        <p className="waiting-dots">{t('team.waitEnemyAttack')}</p>
-      </div>
+      <TeamDefendScreen
+        activeEvent={activeEvent}
+        onEventDone={() => setActiveEvent(null)}
+        attackerTeamName={attackerTeamName}
+        attackerName={pname(ca)}
+        defendMsg={state.defendMsg}
+        myName={pname(myIndex)}
+        myBoard={pboard(myIndex)}
+        defendFlash={state.defendFlash}
+        allyName={pname(ally)}
+        allyBoard={pboard(ally)}
+        allyFlash={state.allyFlash}
+      />
     );
   }
 
@@ -661,32 +613,16 @@ export default function TeamGame({ onExit }) {
     const myVoted  = state.rematchVotes[myIndex];
     const voteCount = state.rematchVotes.filter(Boolean).length;
     return (
-      <div className="screen gameover fade-in">
-        <div className="trophy">{won ? '🏆' : '💫'}</div>
-        <h2><span className="highlight">{winName}</span> {t('team.wonBattle')}</h2>
-        <div className="stats">
-          <div className="stat-card">
-            <div className="stat-name">{t('team.yourTeam')}</div>
-            <div>{t('team.shots', { n: state.myStats.shots })}</div>
-            <div>{t('team.hits', { n: state.myStats.hits })}</div>
-            <div>📊 {state.myStats.shots > 0 ? Math.round((state.myStats.hits / state.myStats.shots) * 100) : 0}%</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-name">{t('team.enemyTeam')}</div>
-            <div>{t('team.shots', { n: state.oppStats.shots })}</div>
-            <div>{t('team.hits', { n: state.oppStats.hits })}</div>
-            <div>📊 {state.oppStats.shots > 0 ? Math.round((state.oppStats.hits / state.oppStats.shots) * 100) : 0}%</div>
-          </div>
-        </div>
-        {!myVoted ? (
-          <button className="big-btn" onClick={requestRematch}>{t('team.playAgain')}</button>
-        ) : (
-          <p className="waiting-dots rematch-note">
-            {t('team.waitAllAccept', { n: voteCount })}
-          </p>
-        )}
-        <button className="small-btn" onClick={onExit}>{t('nav.backToMenu')}</button>
-      </div>
+      <TeamGameOver
+        won={won}
+        winName={winName}
+        myStats={state.myStats}
+        oppStats={state.oppStats}
+        myVoted={myVoted}
+        voteCount={voteCount}
+        onRestart={requestRematch}
+        onExit={onExit}
+      />
     );
   }
 

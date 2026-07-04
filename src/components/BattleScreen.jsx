@@ -46,6 +46,10 @@ export default function BattleScreen({
   onSendProbe,
   shotResult,
   probeResult,
+  // Instabilidade: notifica o pai quando este atacante sorteia um evento, para
+  // que ele seja retransmitido via rede ao(s) outro(s) jogador(es) da sala.
+  // Opcional — LocalGame não passa isto (não há rede) e nada quebra sem ele.
+  onSendEvent,
 }) {
   const t = useT();
   const timerBase = TURN_SECONDS + (upgrades.includes('timer_boost') ? 10 : 0);
@@ -135,8 +139,13 @@ export default function BattleScreen({
       const event = randomEvent();
       setActiveEvent(event);
       applyEvent(event);
+      // Só o ATACANTE sorteia; o defensor (e, no 2v2, os demais jogadores da
+      // sala) nunca sorteiam o seu próprio — só recebem e exibem este mesmo
+      // evento via WebSocket (ver DefendScreen/TeamGame `incomingEvent`).
+      onSendEvent?.(event);
     }, EVENT_INTERVAL * 1000);
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameMode, applyEvent]);
 
   function animateHits(indices) {

@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { ENERGY_PER_TURN } from '../game/constants.js';
 import { shouldOfferUpgrade } from '../game/upgrades.js';
-import { allFound } from '../game/logic.js';
+import { resolveShots, allFound } from '../game/logic.js';
 import { sfx } from '../game/sound.js';
 import Menu from './Menu.jsx';
 import PlacementScreen from './PlacementScreen.jsx';
@@ -25,7 +25,19 @@ export default function LocalGame({ gameMode, onChangeMode }) {
   const [turnKey, setTurnKey] = useState(0);
   const [turnsPlayed, setTurnsPlayed] = useState([0, 0]);
   const [upgrades, setUpgrades] = useState([[], []]);
+  // Protocolo request→response do BattleScreen (mesmo padrão de OnlineGame/TeamGame):
+  // o atacante sempre chama onSendShot/onSendProbe e espera a resolução voltar
+  // por aqui, com `id` incremental para o dedupe interno do BattleScreen.
+  const [shotResult, setShotResult] = useState(null);
+  const [probeResult, setProbeResult] = useState(null);
   const passTimeout = useRef(null);
+  // Guarda o board REAL (não o board "mascarado" que o BattleScreen devolve via
+  // onAttack, que substitui o pieceId das células acertadas por um sentinela
+  // opaco para nunca revelar o tipo de peça ao atacante). applyAttack usa este
+  // ref — e não o campo `board` do payload — para não corromper o pieceId real
+  // do defensor, já que em modo Local o mesmo array `boards` serve tanto de
+  // "meu tabuleiro" quanto de "tabuleiro do inimigo" dependendo de quem ataca.
+  const lastResolvedBoardRef = useRef(null);
 
   const goToPass = useCallback((nextPhase, player, delay = 0) => {
     clearTimeout(passTimeout.current);
@@ -69,6 +81,13 @@ export default function LocalGame({ gameMode, onChangeMode }) {
         });
       }
       setTurnKey((k) => k + 1);
+      // Um novo BattleScreen vai montar aqui (key muda com turnKey) com seus
+      // refs internos lastShotId/lastProbeId zerados a 0; sem isto, um
+      // shotResult/probeResult de id>0 sobrevivendo do turno anterior seria
+      // reaplicado automaticamente no mount, encerrando o turno novo sozinho
+      // (mesmo bug #15 já corrigido no multiplayer).
+      setShotResult(null);
+      setProbeResult(null);
       if (shouldShowUpgrade(player)) {
         setPhase('upgrade');
         return;
@@ -90,10 +109,40 @@ export default function LocalGame({ gameMode, onChangeMode }) {
     }
   }
 
-  function applyAttack({ board, shotsFired, hitsMade, anyHit, destroyed }) {
+  // Resolve o tiro no tabuleiro REAL do inimigo (mesmo padrão de
+  // OnlineGame.resolveAttack/TeamGame), já que aqui os dois jogadores
+  // compartilham o mesmo estado React — não há rede, tudo é síncrono.
+  function resolveAttack(indices) {
+    const enemy = 1 - current;
+    const { board, hitIndices, destroyed, sunkAll } = resolveShots(boards[enemy], indices);
+    lastResolvedBoardRef.current = board;
+    return { hitIndices, destroyed, sunkAll };
+  }
+
+  function onSendShot(indices) {
+    const res = resolveAttack(indices);
+    setShotResult((prev) => ({
+      id: (prev?.id || 0) + 1,
+      indices,
+      hitIndices: res.hitIndices,
+      destroyed: res.destroyed,
+      sunkAll: res.sunkAll,
+    }));
+  }
+
+  function onSendProbe(cells) {
+    const board = boards[1 - current];
+    const resolvedCells = cells.map((i) => ({ index: i, hasPiece: !!board[i].pieceId }));
+    setProbeResult((prev) => ({
+      id: (prev?.id || 0) + 1,
+      cells: resolvedCells,
+    }));
+  }
+
+  function applyAttack({ shotsFired, hitsMade, anyHit, destroyed }) {
     const enemy = 1 - current;
     const nextBoards = boards.slice();
-    nextBoards[enemy] = board;
+    nextBoards[enemy] = lastResolvedBoardRef.current ?? boards[enemy];
     setBoards(nextBoards);
     setStats((s) => {
       const next = s.map((x) => ({ ...x }));
@@ -102,7 +151,7 @@ export default function LocalGame({ gameMode, onChangeMode }) {
       return next;
     });
 
-    if (allFound(board)) {
+    if (allFound(nextBoards[enemy])) {
       setWinner(current);
       sfx.win();
       setTimeout(() => setPhase('gameover'), 1200);
@@ -205,6 +254,10 @@ export default function LocalGame({ gameMode, onChangeMode }) {
           onSpendEnergy={spendEnergy}
           onTimeout={handleTimeout}
           onUpgradeUsed={handleUpgradeUsed}
+          onSendShot={onSendShot}
+          onSendProbe={onSendProbe}
+          shotResult={shotResult}
+          probeResult={probeResult}
         />
       )}
 

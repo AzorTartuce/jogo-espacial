@@ -191,6 +191,7 @@ const pt = {
   'online.waitingMode': 'Aguardando o host escolher o modo de jogo...',
   'online.reconnecting': '📡 Conexão instável — tentando reconectar...',
   'online.oppDisconnected': '⏳ O oponente caiu. Aguardando reconexão...',
+  'online.matchFoundAfterCancel': '🛰️ Pareamento encontrado depois do cancelamento — entrando na partida...',
   'online.rematchWaiting': 'Aguardando {name} aceitar a revanche',
   'online.rematchWants': '{name} quer revanche! Clique em "Jogar de novo"',
 
@@ -219,6 +220,7 @@ const pt = {
   'team.joinTeam': 'Entrar no {team}',
   'team.teamsReady': 'Times prontos! Iniciando...',
   'team.chosenCount': '{n}/4 jogadores escolheram',
+  'team.unbalanced': 'Times desbalanceados! Cada time precisa de exatamente 2 jogadores — alguém precisa trocar de time.',
   'team.teamHidden': 'Equipe escondida!',
   'team.waitOthers': 'Aguardando os outros ({n}/4 prontos)',
   'team.allyAttacking': 'está atacando...',
@@ -435,6 +437,7 @@ const en = {
   'online.waitingMode': 'Waiting for the host to choose the game mode...',
   'online.reconnecting': '📡 Unstable connection — trying to reconnect...',
   'online.oppDisconnected': '⏳ The opponent dropped. Waiting for them to reconnect...',
+  'online.matchFoundAfterCancel': '🛰️ Match found right after cancelling — joining the game...',
   'online.rematchWaiting': 'Waiting for {name} to accept the rematch',
   'online.rematchWants': '{name} wants a rematch! Click "Play again"',
 
@@ -463,6 +466,7 @@ const en = {
   'team.joinTeam': 'Join {team}',
   'team.teamsReady': 'Teams ready! Starting...',
   'team.chosenCount': '{n}/4 players have chosen',
+  'team.unbalanced': 'Teams unbalanced! Each team needs exactly 2 players — someone needs to switch teams.',
   'team.teamHidden': 'Crew hidden!',
   'team.waitOthers': 'Waiting for the others ({n}/4 ready)',
   'team.allyAttacking': 'is attacking...',
@@ -679,6 +683,7 @@ const es = {
   'online.waitingMode': 'Esperando a que el anfitrión elija el modo de juego...',
   'online.reconnecting': '📡 Conexión inestable — intentando reconectar...',
   'online.oppDisconnected': '⏳ El oponente se cayó. Esperando su reconexión...',
+  'online.matchFoundAfterCancel': '🛰️ Emparejamiento encontrado justo después de cancelar — entrando a la partida...',
   'online.rematchWaiting': 'Esperando a que {name} acepte la revancha',
   'online.rematchWants': '¡{name} quiere revancha! Haz clic en "Jugar de nuevo"',
 
@@ -707,6 +712,7 @@ const es = {
   'team.joinTeam': 'Entrar al {team}',
   'team.teamsReady': '¡Equipos listos! Iniciando...',
   'team.chosenCount': '{n}/4 jugadores han elegido',
+  'team.unbalanced': '¡Equipos desbalanceados! Cada equipo necesita exactamente 2 jugadores — alguien debe cambiar de equipo.',
   'team.teamHidden': '¡Equipo escondido!',
   'team.waitOthers': 'Esperando a los demás ({n}/4 listos)',
   'team.allyAttacking': 'está atacando...',
