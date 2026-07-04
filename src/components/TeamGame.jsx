@@ -32,7 +32,7 @@ const enemiesOf = (pi, ta) => {
 const nextAttacker = (cur, hit) => (hit ? cur : (cur + 1) % 4);
 
 // ─── estado inicial ──────────────────────────────────────────────────────────
-const init = {
+export const init = {
   stage: 'lobby', // lobby | waiting | teamSelect | placement | waitPlacement | battle | allyAttacking | defend | gameover
   code: '',
   myIndex: -1,
@@ -67,12 +67,29 @@ function cellsToBoard(cells) {
 function stageFor(s, newTurn = true) {
   const ca = s.currentAttacker;
   const ta = s.teamAssignment;
-  if (ca === s.myIndex) return { ...s, stage: 'battle', energy: newTurn ? s.energy + ENERGY_PER_TURN : s.energy };
+  if (ca === s.myIndex) {
+    // Bug #16 (mesmo padrão do #15 no 1v1): um TeamBattleScreen novo vai montar
+    // aqui com lastShotId/lastProbeId zerados. Sem isto, um shotResult/probeResult
+    // que sobrou do meu último turno como atacante (id>0) seria reaplicado
+    // sozinho no mount, encerrando o turno novo antes de eu jogar. Só zera numa
+    // entrada NOVA em 'battle' — no meio de uma sequência de acertos (já em
+    // battle) o TeamBattleScreen continua montado e precisa do valor atual.
+    const enteringFresh = s.stage !== 'battle';
+    return {
+      ...s,
+      stage: 'battle',
+      energy: newTurn ? s.energy + ENERGY_PER_TURN : s.energy,
+      shotResult: enteringFresh ? null : s.shotResult,
+      probeResult: enteringFresh ? null : s.probeResult,
+    };
+  }
   if (teamOf(ca, ta) === teamOf(s.myIndex, ta)) return { ...s, stage: 'allyAttacking' };
   return { ...s, stage: 'defend' };
 }
 
-function reducer(s, a) {
+// Exportado só para testar a máquina de estados isoladamente (ver comentário
+// equivalente em OnlineGame.jsx).
+export function reducer(s, a) {
   switch (a.type) {
     case 'set-name': return { ...s, myName: a.name };
 

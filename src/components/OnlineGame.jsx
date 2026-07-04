@@ -18,7 +18,7 @@ const ONLINE_MODES = [
   { id: 'duelo',         icon: '🏅' },
 ];
 
-const initialState = {
+export const initialState = {
   // lobby | hosting | searching | placement | waitBoards | battle | defend | upgrade | gameover
   stage: 'lobby',
   code: '',
@@ -73,7 +73,9 @@ function needsUpgrade(s) {
   });
 }
 
-function reducer(s, a) {
+// Exportado (além do default do componente) só para testar a máquina de
+// estados de turno isoladamente, sem precisar montar React/WebSocket.
+export function reducer(s, a) {
   switch (a.type) {
     case 'set-name':
       return { ...s, myName: a.name };
@@ -229,6 +231,11 @@ function reducer(s, a) {
         stage,
         energy: s.gameMode !== 'classico' ? s.energy + ENERGY_PER_TURN : s.energy,
         defendFlash: [],
+        // Bug #15: um novo BattleScreen vai montar aqui com lastShotId/lastProbeId
+        // zerados; sem isto, um shotResult/probeResult do turno anterior (id>0)
+        // é reaplicado automaticamente no mount, encerrando o turno novo sozinho.
+        shotResult: null,
+        probeResult: null,
       };
     }
 
@@ -290,6 +297,10 @@ function reducer(s, a) {
           rematchOpp: false,
           myUpgrades: [],
           myTurnsPlayed: 0,
+          // Bug #15: sem isto, o resultado do último tiro da partida anterior
+          // (id>0) sobrevive e é reaplicado assim que o BattleScreen remontar.
+          shotResult: null,
+          probeResult: null,
         };
       }
       return ns;
