@@ -9,6 +9,7 @@ export default function RoomLobby({
   modes,
   modeTitle,
   onSelectMode,
+  hideModeSelector,
   onCreateRoom,
   onJoinRoom,
   connecting,
@@ -38,17 +39,23 @@ export default function RoomLobby({
         <div className="lobby-panel">
           <h3>{t('online.createRoomH')}</h3>
           <p>{t('online.createRoomP')}</p>
-          <div className="online-mode-selector">
-            {modes.map((m) => (
-              <button
-                key={m.id}
-                className={`online-mode-chip ${gameMode === m.id ? 'active' : ''}`}
-                onClick={() => onSelectMode(m.id)}
-              >
-                {m.icon} {modeTitle(m.id)}
-              </button>
-            ))}
-          </div>
+          {hideModeSelector ? (
+            <div className="online-mode-preset">
+              {modes.find((m) => m.id === gameMode)?.icon} {modeTitle(gameMode)}
+            </div>
+          ) : (
+            <div className="online-mode-selector">
+              {modes.map((m) => (
+                <button
+                  key={m.id}
+                  className={`online-mode-chip ${gameMode === m.id ? 'active' : ''}`}
+                  onClick={() => onSelectMode(m.id)}
+                >
+                  {m.icon} {modeTitle(m.id)}
+                </button>
+              ))}
+            </div>
+          )}
           <button className="big-btn" onClick={onCreateRoom} disabled={connecting}>
             {t('online.createBtn')}
           </button>

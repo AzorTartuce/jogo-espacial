@@ -12,7 +12,7 @@ export default class ErrorBoundary extends Component {
   }
 
   componentDidCatch(error, info) {
-    console.error('[Resgate Espacial] Erro capturado:', error, info);
+    console.error('[Void Strike] Erro capturado:', error, info);
   }
 
   render() {

@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { FLEET, RADAR_COST, PLASMA_COST, MODE_ICONS } from '../game/constants.js';
+import { FLEET, RADAR_COST, PLASMA_COST, MODE_ICONS, MAPS, THEMES } from '../game/constants.js';
 import { sfx } from '../game/sound.js';
 import { useT } from '../i18n/index.jsx';
 
-export default function Menu({ gameMode, onStart, onChangeMode }) {
+export default function Menu({ gameMode, mapId, themeId, onStart, onChangeMode, onChangeMapTheme }) {
   const t = useT();
   const [name1, setName1] = useState('');
   const [name2, setName2] = useState('');
@@ -12,6 +12,9 @@ export default function Menu({ gameMode, onStart, onChangeMode }) {
     sfx.click();
     onStart([name1.trim() || t('menu.defaultP1'), name2.trim() || t('menu.defaultP2')]);
   }
+
+  const map = MAPS.find((m) => m.id === mapId);
+  const theme = THEMES.find((th) => th.id === themeId);
 
   return (
     <div className="screen menu fade-in">
@@ -70,6 +73,20 @@ export default function Menu({ gameMode, onStart, onChangeMode }) {
           {t('menu.changeVariant')}
         </button>
       </div>
+
+      {map && theme && (
+        <div className="menu-mode-row">
+          <span className="menu-mode-label">
+            {t('menu.mapLabel')}{' '}
+            <strong>
+              {map.icon} {t(`map.${map.id}.title`)} · {theme.icon} {t(`theme.${theme.id}.title`)}
+            </strong>
+          </span>
+          <button className="small-btn" onClick={() => { sfx.click(); onChangeMapTheme(); }}>
+            {t('menu.changeMapTheme')}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

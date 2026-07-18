@@ -1,4 +1,4 @@
-package br.com.resgateeespacial;
+package br.com.voidstrike;
 
 import com.getcapacitor.BridgeActivity;
 

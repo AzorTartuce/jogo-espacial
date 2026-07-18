@@ -23,12 +23,6 @@ export default function ModeMenu({ onSelect }) {
           <span className="mode-desc">{t('modeMenu.local.desc')}</span>
         </button>
 
-        <button className="mode-card" onClick={() => pick('quickmatch')}>
-          <span className="mode-icon">🎲</span>
-          <span className="mode-title">{t('modeMenu.quick.title')}</span>
-          <span className="mode-desc">{t('modeMenu.quick.desc')}</span>
-        </button>
-
         <button className="mode-card" onClick={() => pick('online')}>
           <span className="mode-icon">🌐</span>
           <span className="mode-title">{t('modeMenu.online.title')}</span>

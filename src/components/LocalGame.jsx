@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { ENERGY_PER_TURN } from '../game/constants.js';
+import { ENERGY_PER_TURN, MAPS, SIZE } from '../game/constants.js';
 import { shouldOfferUpgrade } from '../game/upgrades.js';
 import { resolveShots, allFound } from '../game/logic.js';
 import { sfx } from '../game/sound.js';
@@ -12,8 +12,9 @@ import GameOver from './GameOver.jsx';
 
 const initialStats = () => ({ shots: 0, hits: 0 });
 
-export default function LocalGame({ gameMode, onChangeMode }) {
+export default function LocalGame({ gameMode, mapId, themeId, planetId, onChangeMode, onChangeMapTheme }) {
   // phase: menu | placement | pass | battle | upgrade | gameover
+  const boardSize = MAPS.find((m) => m.id === mapId)?.size ?? SIZE;
   const [phase, setPhase] = useState('menu');
   const [names, setNames] = useState(['Jogador 1', 'Jogador 2']);
   const [boards, setBoards] = useState([null, null]);
@@ -119,6 +120,9 @@ export default function LocalGame({ gameMode, onChangeMode }) {
     return { hitIndices, destroyed, sunkAll };
   }
 
+  // BattleScreen também manda `kind`/`originIndex` (usados pelo servidor no
+  // modo online pra recalcular as células ele mesmo) — aqui não fazem falta:
+  // é o mesmo dispositivo dos dois lados, `indices`/`cells` já bastam.
   function onSendShot(indices) {
     const res = resolveAttack(indices);
     setShotResult((prev) => ({
@@ -214,7 +218,16 @@ export default function LocalGame({ gameMode, onChangeMode }) {
 
   return (
     <>
-      {phase === 'menu' && <Menu gameMode={gameMode} onStart={startGame} onChangeMode={onChangeMode} />}
+      {phase === 'menu' && (
+        <Menu
+          gameMode={gameMode}
+          mapId={mapId}
+          themeId={themeId}
+          onStart={startGame}
+          onChangeMode={onChangeMode}
+          onChangeMapTheme={onChangeMapTheme}
+        />
+      )}
 
       {phase === 'pass' && afterPass && (
         <PassScreen
@@ -228,6 +241,10 @@ export default function LocalGame({ gameMode, onChangeMode }) {
         <PlacementScreen
           key={current}
           playerName={names[current]}
+          themeId={themeId}
+          mapId={mapId}
+          planetId={planetId}
+          boardSize={boardSize}
           onDone={finishPlacement}
         />
       )}
@@ -249,6 +266,10 @@ export default function LocalGame({ gameMode, onChangeMode }) {
           ownBoard={boards[current]}
           energy={energy[current]}
           gameMode={gameMode}
+          themeId={themeId}
+          mapId={mapId}
+          planetId={planetId}
+          boardSize={boardSize}
           upgrades={gameMode === 'duelo' ? upgrades[current] : []}
           onAttack={applyAttack}
           onSpendEnergy={spendEnergy}

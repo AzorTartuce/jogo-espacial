@@ -21,61 +21,131 @@ function battlingState(overrides) {
   };
 }
 
-describe('bug #14 — deadlock de turno (handoff atrasado obsoleto)', () => {
-  it('ignora um hand-over cujo token não bate mais com o turno atual (no-op)', () => {
-    // Jogador errou -> pendingOppTurn true, token vira 1. Um segundo evento de
-    // rede (ex.: já foi atacado de volta) avança o turno de novo antes do
-    // hand-over de 1100ms dele mesmo disparar -> token vira 2.
+// Desde que o servidor passou a ser a única autoridade de turno/tiro, não há
+// mais duas linhas do tempo client-side correndo uma contra a outra (bug #14
+// antigo, do hand-over/take-turn com token) — só existe uma transição
+// pendente por vez (`pendingResolve`), aplicada por um único `resolve-turn`.
+describe('resolução de turno via servidor (attack-result / attack-received / resolve-turn)', () => {
+  it('erro do meu ataque só troca de tela quando o resolve-turn dispara', () => {
     let s = battlingState({});
-    s = reducer(s, { type: 'i-attacked', board: s.enemyBoard, shotsFired: 1, hitsMade: 0, anyHit: false, sunkAll: false });
-    expect(s.pendingOppTurn).toBe(true);
-    expect(s.turnToken).toBe(1);
+    s = reducer(s, {
+      type: 'attack-result',
+      indices: [0], hitIndices: [], destroyed: null, sunkAll: false,
+      yourTurn: false, energy: 0,
+    });
+    expect(s.stage).toBe('battle'); // ainda não trocou — espera o delay estético
+    expect(s.pendingResolve).toEqual({ stage: 'defend' });
 
-    // Algo mais avançou o turno antes do timer de 1100ms disparar.
-    s = { ...s, turnToken: 2 };
-
-    // O timer atrasado finalmente dispara, mas com o token velho (1).
-    const stale = reducer(s, { type: 'hand-over', token: 1 });
-    expect(stale).toBe(s); // no-op: estado não mudou (mesma referência)
-    expect(stale.stage).toBe('battle'); // não foi forçado de volta para 'defend'
-  });
-
-  it('aplica o hand-over normalmente quando o token ainda bate', () => {
-    let s = battlingState({});
-    s = reducer(s, { type: 'i-attacked', board: s.enemyBoard, shotsFired: 1, hitsMade: 0, anyHit: false, sunkAll: false });
-    const applied = reducer(s, { type: 'hand-over', token: s.turnToken });
+    const applied = reducer(s, { type: 'resolve-turn' });
     expect(applied.stage).toBe('defend');
-    expect(applied.pendingOppTurn).toBe(false);
+    expect(applied.pendingResolve).toBeNull();
   });
 
-  it('mesmo guard vale para take-turn (defensor virando atacante)', () => {
+  it('resolve-turn é no-op quando não há transição pendente', () => {
+    const s = battlingState({ pendingResolve: null });
+    const applied = reducer(s, { type: 'resolve-turn' });
+    expect(applied).toBe(s);
+  });
+
+  it('acerto mantém o turno (stage continua "battle") e atualiza a energia', () => {
+    let s = battlingState({});
+    s = reducer(s, {
+      type: 'attack-result',
+      indices: [63], hitIndices: [63], destroyed: null, sunkAll: false,
+      yourTurn: true, energy: 2,
+    });
+    s = reducer(s, { type: 'resolve-turn' });
+    expect(s.stage).toBe('battle');
+    expect(s.energy).toBe(2);
+  });
+
+  it('attack-result acumula shots/hits em myStats (placar do fim de jogo)', () => {
+    let s = battlingState({});
+    s = reducer(s, {
+      type: 'attack-result',
+      indices: [63], hitIndices: [63], destroyed: null, sunkAll: false,
+      yourTurn: true, energy: 0,
+    });
+    expect(s.myStats).toEqual({ shots: 1, hits: 1 });
+
+    s = reducer(s, {
+      type: 'attack-result',
+      indices: [0], hitIndices: [], destroyed: null, sunkAll: false,
+      yourTurn: false, energy: 0,
+    });
+    expect(s.myStats).toEqual({ shots: 2, hits: 1 });
+  });
+
+  it('attack-received acumula shots/hits em oppStats', () => {
     let s = battlingState({ stage: 'defend' });
-    s = reducer(s, { type: 'attack-received', indices: [0] }); // erro do oponente
-    expect(s.pendingMyTurn).toBe(true);
-    const token = s.turnToken;
+    s = reducer(s, {
+      type: 'attack-received',
+      indices: [63], hitIndices: [63], destroyed: null, sunkAll: false,
+      yourTurn: true, energy: 0, needsUpgrade: false,
+    });
+    expect(s.oppStats).toEqual({ shots: 1, hits: 1 });
+  });
 
-    const stale = reducer({ ...s, turnToken: token + 1 }, { type: 'take-turn', token });
-    expect(stale.stage).toBe('defend'); // no-op, não virou 'battle' à força
+  it('afundar a frota inimiga vai pra gameover só depois do resolve-turn', () => {
+    let s = battlingState({});
+    s = reducer(s, {
+      type: 'attack-result',
+      indices: [63], hitIndices: [63], destroyed: { id: 'perdido', emoji: '👨‍🚀' }, sunkAll: true,
+      yourTurn: true, energy: 0,
+    });
+    expect(s.stage).toBe('battle');
+    expect(s.pendingResolve).toEqual({ winner: 'me' });
 
-    const applied = reducer(s, { type: 'take-turn', token });
-    expect(applied.stage).toBe('battle');
+    const applied = reducer(s, { type: 'resolve-turn' });
+    expect(applied.stage).toBe('gameover');
+    expect(applied.winner).toBe('me');
+  });
+
+  it('ser afundado vai pra gameover com winner "opp"', () => {
+    let s = battlingState({ stage: 'defend' });
+    s = reducer(s, {
+      type: 'attack-received',
+      indices: [63], hitIndices: [63], destroyed: { id: 'perdido', emoji: '👨‍🚀' }, sunkAll: true,
+    });
+    const applied = reducer(s, { type: 'resolve-turn' });
+    expect(applied.stage).toBe('gameover');
+    expect(applied.winner).toBe('opp');
+  });
+
+  it('defensor virando atacante entra em "upgrade" quando o servidor manda needsUpgrade', () => {
+    let s = battlingState({ stage: 'defend' });
+    s = reducer(s, {
+      type: 'attack-received',
+      indices: [0], hitIndices: [], destroyed: null, sunkAll: false,
+      yourTurn: true, energy: 1, needsUpgrade: true,
+    });
+    const applied = reducer(s, { type: 'resolve-turn' });
+    expect(applied.stage).toBe('upgrade');
+  });
+
+  it('timeout do meu turno também passa pelo mesmo delay de resolve-turn', () => {
+    let s = battlingState({});
+    s = reducer(s, { type: 'timeout-you' });
+    expect(s.stage).toBe('battle');
+    const applied = reducer(s, { type: 'resolve-turn' });
+    expect(applied.stage).toBe('defend');
   });
 });
 
-describe('bug #15 — replay de shotResult/probeResult obsoleto ao remontar BattleScreen', () => {
-  it('take-turn zera shotResult/probeResult do turno anterior', () => {
+describe('bug #15 (equivalente) — replay de shotResult/probeResult obsoleto ao remontar BattleScreen', () => {
+  it('resolve-turn zera shotResult/probeResult do turno anterior', () => {
     let s = battlingState({ stage: 'defend' });
-    // Simula que este jogador tinha um shotResult/probeResult antigos (id>0)
-    // de quando foi atacante pela última vez, várias rodadas atrás.
     s = {
       ...s,
       shotResult: { id: 3, indices: [5], hitIndices: [], destroyed: null, sunkAll: false },
       probeResult: { id: 2, cells: [{ index: 7, hasPiece: false }] },
     };
-
-    s = reducer(s, { type: 'attack-received', indices: [0] }); // oponente errou -> minha vez
-    const token = s.turnToken;
-    const next = reducer(s, { type: 'take-turn', token });
+    s = reducer(s, {
+      type: 'attack-received',
+      indices: [0], hitIndices: [], destroyed: null, sunkAll: false,
+      yourTurn: true, energy: 0, needsUpgrade: false,
+    });
+    const next = reducer(s, { type: 'resolve-turn' });
 
     expect(next.stage).toBe('battle');
     // Sem o fix, esses dois campos continuariam com id>0 e o BattleScreen novo
@@ -85,15 +155,41 @@ describe('bug #15 — replay de shotResult/probeResult obsoleto ao remontar Batt
     expect(next.probeResult).toBeNull();
   });
 
-  it('revanche completa também zera shotResult/probeResult da partida anterior', () => {
-    let s = battlingState({
+  it('revanche (rematch-start) também zera shotResult/probeResult da partida anterior', () => {
+    const s = battlingState({
       rematchMe: true,
       shotResult: { id: 5, indices: [1], hitIndices: [1], destroyed: null, sunkAll: false },
       probeResult: { id: 1, cells: [] },
     });
-    const next = reducer(s, { type: 'rematch-opp' });
+    const next = reducer(s, { type: 'rematch-start' });
     expect(next.stage).toBe('placement');
     expect(next.shotResult).toBeNull();
     expect(next.probeResult).toBeNull();
+  });
+});
+
+describe('enemyBoard acompanha acertos/erros/revelações (pro próximo mount do BattleScreen)', () => {
+  it('attack-result marca a célula atingida como shot no enemyBoard', () => {
+    let s = battlingState({});
+    s = reducer(s, {
+      type: 'attack-result',
+      indices: [63], hitIndices: [63], destroyed: null, sunkAll: false,
+      yourTurn: true, energy: 0,
+    });
+    expect(s.enemyBoard[63].shot).toBe(true);
+    expect(s.enemyBoard[63].pieceId).toBeTruthy();
+  });
+
+  it('probe-result marca células reveladas sem sobrescrever células já atingidas', () => {
+    let s = battlingState({});
+    s = reducer(s, {
+      type: 'attack-result',
+      indices: [63], hitIndices: [63], destroyed: null, sunkAll: false,
+      yourTurn: true, energy: 0,
+    });
+    s = reducer(s, { type: 'probe-result', cells: [{ index: 63, hasPiece: false }, { index: 10, hasPiece: true }] });
+    expect(s.enemyBoard[63].pieceId).toBeTruthy(); // não foi sobrescrito pelo probe
+    expect(s.enemyBoard[10].revealed).toBe(true);
+    expect(s.enemyBoard[10].pieceId).toBeTruthy();
   });
 });

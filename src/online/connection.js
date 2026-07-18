@@ -3,6 +3,39 @@ const RENDER_WSS_URL = 'wss://resgate-espacial.onrender.com/ws';
 // Quantas vezes tentamos reconectar automaticamente antes de desistir.
 const MAX_RECONNECT_ATTEMPTS = 5;
 
+// Guarda {code, playerIndex, token} no localStorage pra sobreviver a um
+// refresh de página: o servidor já tem o estado real da partida (ver
+// server.js `sync`), só falta o cliente saber a que sala/slot voltar.
+const SESSION_KEY = 'resgateEspacial.onlineSession';
+
+export function getSavedSession() {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed.code !== 'string' || typeof parsed.token !== 'string') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveSession(info) {
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(info));
+  } catch {
+    // localStorage indisponível (modo privado etc.) — reconexão manual só.
+  }
+}
+
+export function clearSavedSession() {
+  try {
+    localStorage.removeItem(SESSION_KEY);
+  } catch {
+    // ignore
+  }
+}
+
 // Em Capacitor (app Android/iOS) location.protocol é 'capacitor:',
 // então conecta direto no servidor Render em vez de usar o host relativo.
 export function createConnection() {
@@ -81,10 +114,12 @@ export function createConnection() {
     relay(data, to) {
       this.send({ type: 'relay', data, ...(to !== undefined ? { to } : {}) });
     },
-    // Guarda os dados do slot para permitir reconexão automática após uma queda.
+    // Guarda os dados do slot para permitir reconexão automática após uma
+    // queda, e também num refresh/fechamento de página (localStorage).
     setReconnect(info) {
       reconnectInfo = info;
       attempts = 0;
+      saveSession(info);
     },
     close() {
       manualClose = true;

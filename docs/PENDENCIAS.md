@@ -1,4 +1,4 @@
-# Pendências — Resgate Espacial
+# Pendências — Void Strike
 
 **Data da análise:** 2026-07-04
 **Base:** cruzamento item a item entre `RELATORIO_AUDITORIA.txt` / `docs/AUDITORIA_RESULTADO.md`

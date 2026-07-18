@@ -7,7 +7,7 @@ import {
   TURN_SECONDS,
   MODE_ICONS,
 } from '../game/constants.js';
-import { plasmaCells, rowCol, idx } from '../game/logic.js';
+import { plasmaCells, radarArea, rowCol, idx } from '../game/logic.js';
 import { sfx, playEventSound } from '../game/sound.js';
 import { randomEvent, EVENT_INTERVAL } from '../game/events.js';
 import { useT } from '../i18n/index.jsx';
@@ -18,18 +18,6 @@ import EventBanner from './EventBanner.jsx';
 const HIT_PIECE = '__hit__';
 const SIGNAL_PIECE = '__signal__';
 
-// Índices na área quadrada do radar (mesma forma de radarScan, mas só os índices).
-function radarArea(center, radius) {
-  const [row, col] = rowCol(center);
-  const cells = [];
-  for (let r = row - radius; r <= row + radius; r++) {
-    for (let c = col - radius; c <= col + radius; c++) {
-      if (r >= 0 && r < SIZE && c >= 0 && c < SIZE) cells.push(idx(r, c));
-    }
-  }
-  return cells;
-}
-
 export default function BattleScreen({
   playerName,
   enemyName,
@@ -37,6 +25,10 @@ export default function BattleScreen({
   ownBoard,
   energy,
   gameMode,
+  themeId,
+  mapId,
+  planetId,
+  boardSize = SIZE,
   upgrades = [],
   onAttack,
   onSpendEnergy,
@@ -66,6 +58,8 @@ export default function BattleScreen({
   const [localEnergy, setLocalEnergy] = useState(energy);
   const [activeEvent, setActiveEvent] = useState(null);
   const [solarStorm, setSolarStorm] = useState(false);
+  const [radarFx, setRadarFx] = useState(null);
+  const radarFxTimeoutRef = useRef(null);
   const timedOut = useRef(false);
   const radarFreeUsedRef = useRef(false);
   // Descreve a última requisição em voo (tiro/radar/anomalia) para saber como
@@ -77,6 +71,138 @@ export default function BattleScreen({
   useEffect(() => { boardRef.current = board; }, [board]);
   const sendProbeRef = useRef(onSendProbe);
   useEffect(() => { sendProbeRef.current = onSendProbe; });
+
+  // Canvas de efeitos (explosão de partículas no acerto + trilha do plasma).
+  const targetGridRef = useRef(null);
+  const particleCanvasRef = useRef(null);
+  const particlesRef = useRef([]);
+  const trailsRef = useRef([]);
+  const particleRafRef = useRef(null);
+  const reducedMotionRef = useRef(
+    typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  );
+
+  useEffect(() => {
+    const canvas = particleCanvasRef.current;
+    const container = targetGridRef.current;
+    if (!canvas || !container) return;
+    function resize() {
+      const rect = container.getBoundingClientRect();
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+    }
+    resize();
+    window.addEventListener('resize', resize);
+    return () => window.removeEventListener('resize', resize);
+  }, [boardSize]);
+
+  useEffect(() => () => cancelAnimationFrame(particleRafRef.current), []);
+
+  function cellCenter(index) {
+    const canvas = particleCanvasRef.current;
+    const [row, col] = rowCol(index, boardSize);
+    return {
+      x: ((col + 0.5) / boardSize) * (canvas?.width || 0),
+      y: ((row + 0.5) / boardSize) * (canvas?.height || 0),
+    };
+  }
+
+  function ensureParticleLoop() {
+    if (particleRafRef.current) return;
+    const canvas = particleCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const step = () => {
+      const now = performance.now();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Trilhas do tiro de plasma: traço luminoso que percorre origem → alvo.
+      trailsRef.current = trailsRef.current.filter((tr) => {
+        const progress = Math.min((now - tr.start) / tr.duration, 1);
+        const hx = tr.x0 + (tr.x1 - tr.x0) * progress;
+        const hy = tr.y0 + (tr.y1 - tr.y0) * progress;
+        const grad = ctx.createLinearGradient(tr.x0, tr.y0, hx, hy);
+        grad.addColorStop(0, 'rgba(255, 94, 156, 0)');
+        grad.addColorStop(1, 'rgba(255, 160, 90, 0.9)');
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(tr.x0, tr.y0);
+        ctx.lineTo(hx, hy);
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(255, 200, 120, 0.9)';
+        ctx.beginPath();
+        ctx.arc(hx, hy, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+        return progress < 1;
+      });
+
+      // Partículas de impacto.
+      const next = [];
+      for (const p of particlesRef.current) {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.06;
+        p.life -= 0.03;
+        if (p.life > 0) {
+          ctx.globalAlpha = Math.max(p.life, 0);
+          ctx.fillStyle = p.color;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+          ctx.fill();
+          next.push(p);
+        }
+      }
+      ctx.globalAlpha = 1;
+      particlesRef.current = next;
+
+      if (particlesRef.current.length || trailsRef.current.length) {
+        particleRafRef.current = requestAnimationFrame(step);
+      } else {
+        particleRafRef.current = null;
+      }
+    };
+    particleRafRef.current = requestAnimationFrame(step);
+  }
+
+  function spawnHitBurst(indices) {
+    if (reducedMotionRef.current || !indices.length) return;
+    for (const i of indices) {
+      const { x, y } = cellCenter(i);
+      for (let k = 0; k < 22; k++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 1 + Math.random() * 3.2;
+        particlesRef.current.push({
+          x,
+          y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: 1,
+          size: 1.5 + Math.random() * 2.5,
+          color: Math.random() > 0.5 ? 'rgba(255, 110, 160, 0.95)' : 'rgba(255, 200, 120, 0.95)',
+        });
+      }
+    }
+    ensureParticleLoop();
+  }
+
+  function spawnPlasmaTrail(originIndex, targetIndices) {
+    if (reducedMotionRef.current || !targetIndices.length) return;
+    const origin = cellCenter(originIndex);
+    const now = performance.now();
+    for (const i of targetIndices) {
+      const target = cellCenter(i);
+      trailsRef.current.push({
+        x0: origin.x,
+        y0: origin.y,
+        x1: target.x,
+        y1: target.y,
+        start: now,
+        duration: 260,
+      });
+    }
+    ensureParticleLoop();
+  }
 
   const effectiveRadarCost = solarStorm ? RADAR_COST + 2 : RADAR_COST;
   const effectivePlasmaCost = solarStorm ? basePlasmaCost + 2 : basePlasmaCost;
@@ -121,7 +247,7 @@ export default function BattleScreen({
         if (candidates.length) {
           const target = candidates[Math.floor(Math.random() * candidates.length)];
           pendingRef.current = { kind: 'reveal' };
-          sendProbeRef.current?.([target]);
+          sendProbeRef.current?.([target], null, 'vision');
         }
         break;
       }
@@ -154,13 +280,26 @@ export default function BattleScreen({
     setTimeout(() => setShake(false), 400);
   }
 
+  // Dispara a varredura visual do radar centrada na célula escolhida.
+  function triggerRadarFx(index, radius) {
+    const [row, col] = rowCol(index, boardSize);
+    setRadarFx({ row, col, radius });
+    clearTimeout(radarFxTimeoutRef.current);
+    radarFxTimeoutRef.current = setTimeout(() => setRadarFx(null), 1050);
+  }
+
+  useEffect(() => () => clearTimeout(radarFxTimeoutRef.current), []);
+
   // Envia os tiros ao defensor; a resolução (acerto/erro) volta em `shotResult`.
-  function sendShot(indices, prefix) {
+  // `kind`/`originIndex` deixam o lado servidor (online) recalcular as
+  // células-alvo ele mesmo em vez de confiar na lista `indices` do cliente —
+  // o LocalGame ignora esses dois parâmetros extra (resolve tudo no ato).
+  function sendShot(indices, kind, originIndex, prefix) {
     if (!indices.length) return;
     setLocked(true);
     setMode('fire');
     pendingRef.current = { kind: 'shot', prefix: prefix || null };
-    onSendShot(indices);
+    onSendShot(indices, kind, originIndex);
   }
 
   function handleCellClick(index) {
@@ -169,7 +308,7 @@ export default function BattleScreen({
     if (gameMode === 'classico') {
       if (board[index].shot) return;
       sfx.laser();
-      sendShot([index]);
+      sendShot([index], 'normal', index);
       return;
     }
 
@@ -186,26 +325,28 @@ export default function BattleScreen({
         onSpendEnergy(cost);
       }
       setLocked(true);
+      triggerRadarFx(index, radarRadius);
       pendingRef.current = { kind: 'radar' };
-      onSendProbe(radarArea(index, radarRadius));
+      onSendProbe(radarArea(index, radarRadius, boardSize), index, 'radar');
       return;
     }
 
     if (mode === 'plasma') {
       if (localEnergy < effectivePlasmaCost) return;
-      const targets = plasmaCells(index).filter((i) => !board[i].shot);
+      const targets = plasmaCells(index, boardSize).filter((i) => !board[i].shot);
       if (targets.length === 0) return;
       sfx.plasma();
       setLocalEnergy((e) => e - effectivePlasmaCost);
       onSpendEnergy(effectivePlasmaCost);
-      sendShot(targets, t('battle.plasmaBurst'));
+      spawnPlasmaTrail(index, targets);
+      sendShot(targets, 'plasma', index, t('battle.plasmaBurst'));
       return;
     }
 
     // Tiro normal
     if (board[index].shot) return;
     sfx.laser();
-    sendShot([index]);
+    sendShot([index], 'normal', index);
   }
 
   // Aplica o resultado do tiro devolvido pelo defensor.
@@ -223,6 +364,7 @@ export default function BattleScreen({
     }
     setBoard(next);
     animateHits(indices);
+    spawnHitBurst(res.hitIndices);
     setMode('fire');
 
     const hitsMade = res.hitIndices.length;
@@ -236,19 +378,19 @@ export default function BattleScreen({
       if (!anyHit && upgrades.includes('anomaly_sensor') && indices.length > 0) {
         const candidates = new Set();
         for (const cellIdx of indices) {
-          const [row, col] = rowCol(cellIdx);
+          const [row, col] = rowCol(cellIdx, boardSize);
           for (const [dr, dc] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
             const r = row + dr;
             const c = col + dc;
-            if (r >= 0 && r < SIZE && c >= 0 && c < SIZE) {
-              const j = idx(r, c);
+            if (r >= 0 && r < boardSize && c >= 0 && c < boardSize) {
+              const j = idx(r, c, boardSize);
               if (!next[j].shot && !next[j].revealed) candidates.add(j);
             }
           }
         }
         if (candidates.size) {
           pendingRef.current = { kind: 'anomaly' };
-          onSendProbe([...candidates]);
+          onSendProbe([...candidates], null, 'anomaly');
         }
       }
 
@@ -331,7 +473,10 @@ export default function BattleScreen({
   const modeLabelText = `${MODE_ICONS[gameMode] ?? ''} ${modeTitle}`.trim();
 
   return (
-    <div className={`screen battle fade-in ${shake ? 'shake' : ''}`}>
+    <div
+      className={`screen battle fade-in ${shake ? 'shake' : ''}${mapId ? ` map-${mapId}` : ''}`}
+      data-planet={mapId === 'planetas' ? planetId : undefined}
+    >
       {activeEvent && (
         <EventBanner event={activeEvent} onDone={() => setActiveEvent(null)} />
       )}
@@ -352,10 +497,12 @@ export default function BattleScreen({
       <div className="battle-layout">
         <div className="target-side">
           <div
-            className={`grid target-grid mode-${mode}`}
-            style={{ '--size': SIZE }}
+            ref={targetGridRef}
+            className={`grid target-grid mode-${mode}${themeId ? ` theme-${themeId}` : ''}`}
+            style={{ '--size': boardSize }}
             aria-label={t('battle.enemyBoardOf', { name: enemyName })}
           >
+            <canvas ref={particleCanvasRef} className="hit-fx-canvas" aria-hidden="true" />
             {board.map((cell, i) => {
               const justHit = flash.has(i);
               let content = '';
@@ -374,7 +521,7 @@ export default function BattleScreen({
                 content = cell.pieceId ? '·' : '';
                 stateKey = cell.pieceId ? 'battle.cellSignal' : 'battle.cellClear';
               }
-              const [cr, cc] = rowCol(i);
+              const [cr, cc] = rowCol(i, boardSize);
               return (
                 <button
                   key={i}
@@ -387,6 +534,17 @@ export default function BattleScreen({
                 </button>
               );
             })}
+            {radarFx && (
+              <div
+                className="radar-sweep-fx"
+                style={{
+                  left: `${((radarFx.col + 0.5) / boardSize) * 100}%`,
+                  top: `${((radarFx.row + 0.5) / boardSize) * 100}%`,
+                  width: `${((radarFx.radius * 2 + 1) / boardSize) * 100}%`,
+                  height: `${((radarFx.radius * 2 + 1) / boardSize) * 100}%`,
+                }}
+              />
+            )}
           </div>
 
           {showPowers && (
@@ -439,7 +597,7 @@ export default function BattleScreen({
 
         <div className="own-side">
           <div className="own-title">{t('battle.yourTeam')}</div>
-          <div className="grid own-grid" style={{ '--size': SIZE }}>
+          <div className={`grid own-grid${themeId ? ` theme-${themeId}` : ''}`} style={{ '--size': boardSize }}>
             {ownBoard.map((cell, i) => {
               const piece = cell.pieceId
                 ? FLEET.find((p) => p.id === cell.pieceId)

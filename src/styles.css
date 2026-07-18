@@ -6,7 +6,9 @@
 
 :root {
   --bg: #07071a;
-  --panel: rgba(20, 22, 50, 0.75);
+  --panel: rgba(36, 40, 84, 0.58);
+  --panel-sheen: rgba(255, 255, 255, 0.14);
+  --panel-blur: 14px;
   --cyan: #4de8ff;
   --purple: #b16dff;
   --pink: #ff5e9c;
@@ -14,6 +16,30 @@
   --yellow: #ffd75e;
   --red: #ff5e5e;
   --text: #e8ecff;
+}
+
+/* ===== Vidro (glassmorphism) para painéis translúcidos ===== */
+:where(
+  .mode-card,
+  .mode-card-void,
+  .planet-chip,
+  .void-slot,
+  .lobby-panel,
+  .room-code,
+  .menu-fleet,
+  .grid,
+  .fleet-btn,
+  .mode-badge,
+  .timer,
+  .energy,
+  .stat-card,
+  .team-waiting-panel,
+  .team-select-panel,
+  .settings-panel
+) {
+  backdrop-filter: blur(var(--panel-blur));
+  -webkit-backdrop-filter: blur(var(--panel-blur));
+  box-shadow: inset 0 1px 0 var(--panel-sheen), inset 0 0 0 1px rgba(255, 255, 255, 0.03);
 }
 
 html,
@@ -67,12 +93,15 @@ body::before {
 }
 
 body::after {
+  inset: -12%;
   background: radial-gradient(
       ellipse 80% 50% at 70% 20%,
       rgba(86, 47, 173, 0.25),
       transparent
     ),
     radial-gradient(ellipse 60% 40% at 20% 80%, rgba(20, 120, 160, 0.2), transparent);
+  filter: blur(6px);
+  animation: nebula-drift 22s ease-in-out infinite alternate;
 }
 
 @keyframes twinkle {
@@ -81,6 +110,37 @@ body::after {
   }
   to {
     opacity: 1;
+  }
+}
+
+@keyframes nebula-drift {
+  from {
+    transform: translate(-2%, -1%) scale(1);
+  }
+  to {
+    transform: translate(2%, 1.5%) scale(1.08);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::before,
+  body::after {
+    animation: none;
+  }
+
+  .fleet-btn {
+    transition: border-color 0.15s, background 0.15s;
+  }
+
+  .fleet-btn:hover,
+  .fleet-btn.selected {
+    transform: none;
+  }
+
+  .radar-sweep-fx,
+  .radar-sweep-fx::before {
+    animation: none;
+    opacity: 0.5;
   }
 }
 
@@ -178,6 +238,280 @@ body::after {
   line-height: 1.4;
 }
 
+.mode-card.selected {
+  border-color: var(--cyan);
+  box-shadow: 0 0 20px rgba(77, 232, 255, 0.3);
+}
+
+.mode-card.locked {
+  opacity: 0.45;
+  cursor: not-allowed;
+  position: relative;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .mode-card.locked:hover {
+    transform: none;
+    box-shadow: none;
+  }
+}
+
+.mode-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #b9c2e8;
+  background: rgba(10, 12, 35, 0.6);
+  border: 1px solid rgba(77, 232, 255, 0.25);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+
+.mapmenu-actions {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: center;
+  margin-top: 12px;
+}
+
+.planet-picker {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.planet-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--planet-color, rgba(77, 232, 255, 0.3));
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: box-shadow 0.15s, transform 0.15s;
+}
+
+.planet-chip.selected {
+  box-shadow: 0 0 14px var(--planet-color, var(--cyan));
+  transform: translateY(-2px);
+}
+
+/* ===== Modo Void ===== */
+.mode-card-void {
+  border-color: rgba(190, 120, 255, 0.4);
+  background: linear-gradient(160deg, var(--panel), rgba(120, 60, 200, 0.12));
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .mode-card-void:hover {
+    border-color: #be78ff;
+    box-shadow: 0 0 28px rgba(190, 120, 255, 0.4);
+  }
+}
+
+.mode-card-void .mode-title {
+  color: #d9aaff;
+}
+
+.void-hint {
+  text-align: center;
+  color: #b9c2e8;
+  margin-top: -6px;
+}
+
+.void-slots {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin: 10px 0 6px;
+}
+
+.void-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 150px;
+  padding: 20px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(190, 120, 255, 0.35);
+  background: var(--panel);
+}
+
+.void-slot-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #b9c2e8;
+}
+
+.void-slot-icon {
+  font-size: 2.2rem;
+}
+
+.void-slot-value {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #d9aaff;
+  text-align: center;
+}
+
+.void-draw .void-slot {
+  animation: void-flicker 0.12s ease-out;
+}
+
+.void-reveal .void-slot {
+  border-color: #be78ff;
+  box-shadow: 0 0 24px rgba(190, 120, 255, 0.45);
+  animation: void-reveal-pop 0.4s ease-out;
+}
+
+@keyframes void-flicker {
+  from { opacity: 0.4; transform: scale(0.94); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes void-reveal-pop {
+  0% { transform: scale(0.85); opacity: 0.5; }
+  60% { transform: scale(1.05); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .void-draw .void-slot,
+  .void-reveal .void-slot {
+    animation: none;
+  }
+}
+
+/* ===== Mapa: Planetas do Sistema Solar ===== */
+.map-planetas[data-planet] .placement-grid,
+.map-planetas[data-planet] .target-grid,
+.map-planetas[data-planet] .own-grid {
+  border-color: color-mix(in srgb, var(--planet-color, var(--cyan)) 60%, transparent);
+  box-shadow: 0 0 30px color-mix(in srgb, var(--planet-color, var(--cyan)) 30%, transparent);
+}
+.map-planetas[data-planet='mercurio'] { --planet-color: #9c8b7a; }
+.map-planetas[data-planet='venus'] { --planet-color: #d9a441; }
+.map-planetas[data-planet='marte'] { --planet-color: #c1440e; }
+.map-planetas[data-planet='jupiter'] { --planet-color: #c9975b; }
+.map-planetas[data-planet='saturno'] { --planet-color: #d9c18a; }
+.map-planetas[data-planet='netuno'] { --planet-color: #3d5adf; }
+
+/* Disco do planeta pairando atrás do tabuleiro, com leve rotação/flutuação */
+.map-planetas[data-planet] .battle-layout,
+.map-planetas[data-planet] .placement-layout {
+  position: relative;
+}
+
+.map-planetas[data-planet] .battle-layout::before,
+.map-planetas[data-planet] .placement-layout::before {
+  content: '';
+  position: absolute;
+  top: -70px;
+  right: -20px;
+  width: 200px;
+  height: 200px;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: 50%;
+  background: radial-gradient(
+      circle at 32% 28%,
+      color-mix(in srgb, var(--planet-color, var(--cyan)) 75%, white 20%),
+      color-mix(in srgb, var(--planet-color, var(--cyan)) 85%, transparent) 45%,
+      color-mix(in srgb, var(--planet-color, var(--cyan)) 40%, black 55%) 78%
+    ),
+    conic-gradient(
+      from 0deg,
+      transparent 0 20%,
+      rgba(0, 0, 0, 0.25) 25%,
+      transparent 30% 55%,
+      rgba(0, 0, 0, 0.18) 60%,
+      transparent 65% 100%
+    );
+  box-shadow: 0 0 70px color-mix(in srgb, var(--planet-color, var(--cyan)) 45%, transparent);
+  animation: planet-drift 16s ease-in-out infinite;
+}
+
+.map-planetas[data-planet] .target-side,
+.map-planetas[data-planet] .own-side,
+.map-planetas[data-planet] .fleet-list {
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes planet-drift {
+  0% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-12px) rotate(180deg);
+  }
+  100% {
+    transform: translateY(0) rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-planetas[data-planet] .battle-layout::before,
+  .map-planetas[data-planet] .placement-layout::before {
+    animation: none;
+  }
+}
+
+/* ===== Mapa: Girando — fundo rotativo atrás do tabuleiro, dando sensação de
+   movimento sem mexer nas células (que continuam clicáveis normalmente). */
+.map-girando .battle-layout,
+.map-girando .placement-layout {
+  position: relative;
+}
+
+.map-girando .battle-layout::before,
+.map-girando .placement-layout::before {
+  content: '';
+  position: absolute;
+  inset: -40%;
+  z-index: 0;
+  pointer-events: none;
+  background: conic-gradient(
+    from 0deg,
+    rgba(77, 232, 255, 0.12),
+    transparent 25%,
+    rgba(168, 129, 255, 0.1) 50%,
+    transparent 75%,
+    rgba(77, 232, 255, 0.12)
+  );
+  border-radius: 50%;
+  animation: map-spin 40s linear infinite;
+}
+
+.map-girando .target-side,
+.map-girando .own-side,
+.map-girando .fleet-list {
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes map-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-girando .battle-layout::before,
+  .map-girando .placement-layout::before {
+    animation: none;
+  }
+}
+
 /* ===== Lobby online ===== */
 .lobby-input {
   background: rgba(10, 12, 35, 0.8);
@@ -244,7 +578,8 @@ body::after {
   border: 2px solid var(--cyan);
   color: var(--cyan);
   text-shadow: 0 0 18px rgba(77, 232, 255, 0.7);
-  box-shadow: 0 0 30px rgba(77, 232, 255, 0.3);
+  box-shadow: 0 0 30px rgba(77, 232, 255, 0.3), inset 0 1px 0 var(--panel-sheen),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03);
 }
 
 .error-box {
@@ -477,7 +812,63 @@ body::after {
   border: 1px solid rgba(77, 232, 255, 0.25);
   border-radius: 14px;
   padding: 10px;
-  box-shadow: 0 0 30px rgba(20, 30, 90, 0.6);
+  box-shadow: 0 0 30px rgba(20, 30, 90, 0.6), inset 0 1px 0 var(--panel-sheen),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+  position: relative;
+}
+
+/* ===== Canvas de efeitos (explosão de impacto + trilha de plasma) ===== */
+.hit-fx-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* ===== Varredura de radar ===== */
+.radar-sweep-fx {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  pointer-events: none;
+  border: 1px solid rgba(77, 232, 255, 0.55);
+  box-shadow: 0 0 22px rgba(77, 232, 255, 0.4), inset 0 0 18px rgba(77, 232, 255, 0.2);
+  overflow: hidden;
+  z-index: 2;
+  animation: radar-fx-fade 1.05s ease-out forwards;
+}
+
+.radar-sweep-fx::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: conic-gradient(from 0deg, rgba(77, 232, 255, 0.7), transparent 65deg, transparent 360deg);
+  animation: radar-fx-spin 1.05s linear;
+}
+
+@keyframes radar-fx-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes radar-fx-fade {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.55);
+  }
+  18% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  75% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
 }
 
 .cell {
@@ -519,6 +910,7 @@ body::after {
   flex-direction: column;
   gap: 8px;
   min-width: 250px;
+  perspective: 900px;
 }
 
 .fleet-btn {
@@ -532,7 +924,8 @@ body::after {
   color: var(--text);
   cursor: pointer;
   font-size: 0.92rem;
-  transition: border-color 0.15s, background 0.15s;
+  transform-style: preserve-3d;
+  transition: border-color 0.15s, background 0.15s, transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .fleet-btn .fleet-name {
@@ -540,10 +933,19 @@ body::after {
   text-align: left;
 }
 
+/* Peça "física": leve inclinação 3D ao ser pega, como uma miniatura na mão */
+@media (hover: hover) and (pointer: fine) {
+  .fleet-btn:not(.placed):not(:disabled):hover {
+    transform: rotateX(6deg) rotateY(-5deg) translateY(-3px) translateZ(6px);
+    box-shadow: 0 16px 26px -14px rgba(77, 232, 255, 0.5);
+  }
+}
+
 .fleet-btn.selected {
   border-color: var(--cyan);
   background: rgba(77, 232, 255, 0.15);
   box-shadow: 0 0 14px rgba(77, 232, 255, 0.25);
+  transform: rotateX(4deg) rotateY(-3deg) translateY(-2px) translateZ(3px);
 }
 
 .fleet-btn.placed {
@@ -1248,6 +1650,19 @@ body::after {
   }
 }
 
+.online-mode-preset {
+  display: inline-block;
+  margin: 0 auto 12px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 5px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--cyan);
+  background: rgba(77, 232, 255, 0.15);
+  color: var(--cyan);
+  text-align: center;
+}
+
 .online-join-hint {
   font-size: 0.82rem;
   color: #6a7098;
@@ -1485,7 +1900,8 @@ body::after {
   border: 1px solid var(--cyan);
   border-radius: 18px;
   padding: 22px;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45), inset 0 1px 0 var(--panel-sheen),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03);
   backdrop-filter: blur(12px);
 }
 

@@ -11,9 +11,9 @@ import {
 import { sfx } from '../game/sound.js';
 import { useT } from '../i18n/index.jsx';
 
-export default function PlacementScreen({ playerName, onDone }) {
+export default function PlacementScreen({ playerName, themeId, mapId, planetId, boardSize = SIZE, onDone }) {
   const t = useT();
-  const [board, setBoard] = useState(emptyBoard);
+  const [board, setBoard] = useState(() => emptyBoard(boardSize));
   const [selected, setSelected] = useState(FLEET[0].id);
   const [horizontal, setHorizontal] = useState(true);
   const [hoverIndex, setHoverIndex] = useState(null);
@@ -36,9 +36,9 @@ export default function PlacementScreen({ playerName, onDone }) {
   const preview = useMemo(() => {
     if (hoverIndex === null || !selectedPiece || placed.has(selected))
       return { cells: new Set(), valid: false };
-    const cells = canPlace(board, hoverIndex, selectedPiece.size, horizontal);
+    const cells = canPlace(board, hoverIndex, selectedPiece.size, horizontal, boardSize);
     return { cells: new Set(cells || []), valid: !!cells };
-  }, [hoverIndex, board, selectedPiece, horizontal, placed, selected]);
+  }, [hoverIndex, board, selectedPiece, horizontal, placed, selected, boardSize]);
 
   function handleCellClick(index) {
     const cell = board[index];
@@ -61,7 +61,7 @@ export default function PlacementScreen({ playerName, onDone }) {
       return;
     }
 
-    const cells = canPlace(board, index, selectedPiece.size, horizontal);
+    const cells = canPlace(board, index, selectedPiece.size, horizontal, boardSize);
     if (!cells) return;
     sfx.click();
     const next = placePiece(board, selected, cells);
@@ -74,11 +74,14 @@ export default function PlacementScreen({ playerName, onDone }) {
 
   function randomize() {
     sfx.radar();
-    setBoard(randomBoard());
+    setBoard(randomBoard(boardSize));
   }
 
   return (
-    <div className="screen placement fade-in">
+    <div
+      className={`screen placement fade-in${mapId ? ` map-${mapId}` : ''}`}
+      data-planet={mapId === 'planetas' ? planetId : undefined}
+    >
       <h2>
         <span className="highlight">{playerName}</span>, {t('placement.hide')}
       </h2>
@@ -122,8 +125,8 @@ export default function PlacementScreen({ playerName, onDone }) {
         </div>
 
         <div
-          className="grid placement-grid"
-          style={{ '--size': SIZE }}
+          className={`grid placement-grid${themeId ? ` theme-${themeId}` : ''}`}
+          style={{ '--size': boardSize }}
           onPointerDown={(e) => {
             lastPointerType.current = e.pointerType || 'mouse';
           }}

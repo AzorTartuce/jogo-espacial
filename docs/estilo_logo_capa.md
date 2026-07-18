@@ -1,4 +1,4 @@
-# Estilo da Capa / Logo — Resgate Espacial
+# Estilo da Capa / Logo — Void Strike
 
 Anotações para a criação da arte de capa do jogo (batalha naval espacial).
 

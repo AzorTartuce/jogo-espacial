@@ -1,8 +1,8 @@
-# Política de Privacidade — Resgate Espacial
+# Política de Privacidade — Void Strike
 
 **Última atualização:** 11 de junho de 2026
 
-Esta política descreve como o jogo **Resgate Espacial** trata as informações dos jogadores. Ela se aplica ao jogo em sua versão web e a qualquer versão publicada em lojas de aplicativos (como o Google Play).
+Esta política descreve como o jogo **Void Strike** trata as informações dos jogadores. Ela se aplica ao jogo em sua versão web e a qualquer versão publicada em lojas de aplicativos (como o Google Play).
 
 ## 1. Quais dados são utilizados
 
@@ -14,7 +14,7 @@ Esta política descreve como o jogo **Resgate Espacial** trata as informações 
 
 - Não coletamos nome completo, e-mail, telefone, localização, contatos ou fotos.
 - Não usamos câmera, microfone ou GPS.
-- Não exibimos anúncios (ads).
+
 - Não usamos ferramentas de análise/rastreamento (analytics) de terceiros.
 - Não criamos contas de usuário nem exigimos login.
 - Não compartilhamos dados com terceiros.
@@ -45,4 +45,4 @@ Em caso de dúvidas sobre esta política de privacidade, entre em contato pelo e
 
 **zcodedevs@gmail.com**
 
-> A Google Play exige que esse documento esteja disponível publicamente através de uma URL — a página `public/privacy.html` deste projeto fica acessível em `/privacy.html` assim que o site for hospedado (ex: `https://seu-app.onrender.com/privacy.html`).
+> A Google Play exige que esse documento esteja disponível publicamente através de uma URL — a página `public/privacy.html` deste projeto fica acessível em `https://resgate-espacial.onrender.com/privacy.html` (URL do serviço configurado em `render.yaml`).

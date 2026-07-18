@@ -1,4 +1,4 @@
-# Auditoria Completa — Resgate Espacial
+# Auditoria Completa — Void Strike
 
 **Data:** 2026-07-02
 **Escopo:** leitura integral do código-fonte (`server.js`, `src/game/*`, `src/online/*`, `src/components/*`, `src/i18n/*`, `src/styles.css`), `README.md`, `docs/game-mode.md` e `package.json`. Nenhum arquivo do jogo foi alterado.
@@ -53,7 +53,7 @@ Quase. A base mecânica (batalha naval + energia/poderes) é sólida, o poliment
 
 ## Executive Summary
 
-"Resgate Espacial" é um jogo de batalha naval espacial para 2 jogadores (React + Vite + WebSocket), com 4 modos de jogo (Clássico, Ascensão, Instabilidade, Duelo de Escolhas), modo local (mesmo dispositivo) e online (1v1 e 2v2), preparado para publicação na Google Play via Capacitor. A base mecânica é sólida e o polimento visual/i18n/tema está em um nível notavelmente alto para o escopo do projeto. Os maiores problemas não são de "fun factor" — é de **confiabilidade multiplayer** (sem reconexão, tabuleiro do oponente exposto no cliente) e de **onboarding** (jogador novo não é ensinado a jogar fora do fluxo Local). Nenhum teste automatizado existe no projeto, o que aumenta o risco de qualquer correção rápida pré-lançamento introduzir regressões silenciosas. Com um ciclo focado nesses pontos, o jogo tem potencial real de ser um produto competitivo para lançamento mobile casual.
+"Void Strike" é um jogo de batalha naval espacial para 2 jogadores (React + Vite + WebSocket), com 4 modos de jogo (Clássico, Ascensão, Instabilidade, Duelo de Escolhas), modo local (mesmo dispositivo) e online (1v1 e 2v2), preparado para publicação na Google Play via Capacitor. A base mecânica é sólida e o polimento visual/i18n/tema está em um nível notavelmente alto para o escopo do projeto. Os maiores problemas não são de "fun factor" — é de **confiabilidade multiplayer** (sem reconexão, tabuleiro do oponente exposto no cliente) e de **onboarding** (jogador novo não é ensinado a jogar fora do fluxo Local). Nenhum teste automatizado existe no projeto, o que aumenta o risco de qualquer correção rápida pré-lançamento introduzir regressões silenciosas. Com um ciclo focado nesses pontos, o jogo tem potencial real de ser um produto competitivo para lançamento mobile casual.
 
 ## Pontos fortes
 

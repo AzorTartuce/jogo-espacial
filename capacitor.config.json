@@ -1,6 +1,6 @@
 {
-  "appId": "br.com.resgateeespacial",
-  "appName": "Resgate Espacial",
+  "appId": "br.com.voidstrike",
+  "appName": "Void Strike",
   "webDir": "dist",
   "android": {
     "allowMixedContent": false,

@@ -1,4 +1,4 @@
-# 🚀 Resgate Espacial
+# 🚀 Void Strike
 
 Um jogo de batalha naval espacial para 2 jogadores, feito com React + Vite. Cada jogador esconde sua equipe de astronautas numa grade 8x8 e tenta encontrar a equipe escondida do adversário primeiro.
 

@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Resgate Espacial</string>
-    <string name="title_activity_main">Resgate Espacial</string>
-    <string name="package_name">br.com.resgateeespacial</string>
-    <string name="custom_url_scheme">br.com.resgateeespacial</string>
+    <string name="app_name">Void Strike</string>
+    <string name="title_activity_main">Void Strike</string>
+    <string name="package_name">br.com.voidstrike</string>
+    <string name="custom_url_scheme">br.com.voidstrike</string>
 </resources>
