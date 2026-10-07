@@ -106,6 +106,23 @@ function otherIdx(i) {
   return i === 0 ? 1 : 0;
 }
 
+// Helpers de autoridade do 2v2 (ver bloco "Autoridade de jogo — salas 2v2" mais abaixo).
+function teamOfIdx(pi, ta) {
+  return ta ? ta[pi] : (pi < 2 ? 0 : 1);
+}
+
+function nextTeamAttacker(cur, hit) {
+  return hit ? cur : (cur + 1) % 4;
+}
+
+function teamWinnerIfAny(game) {
+  for (const team of [0, 1]) {
+    const members = [0, 1, 2, 3].filter((pi) => teamOfIdx(pi, game.teamAssignment) === team);
+    if (members.length && members.every((pi) => game.sunk[pi])) return 1 - team;
+  }
+  return -1;
+}
+
 function clearTurnTimer(game) {
   if (game.turnTimer) {
     clearTimeout(game.turnTimer);
@@ -269,6 +286,20 @@ wss.on('connection', (ws) => {
         send(room.players[i].ws, { type: 'team-player-joined', playerIndex, name, players: playerList });
       }
       if (room.players.length === room.maxPlayers) {
+        // Autoridade de jogo do 2v2 (ver bloco mais abaixo): a partir daqui o
+        // servidor guarda times/tabuleiros/turno reais em vez de só repassar
+        // mensagens entre os 4 clientes.
+        room.game = {
+          mode: 'ascensao',
+          teamAssignment: null,
+          teamChoices: {},
+          boards: [null, null, null, null],
+          energy: [0, 0, 0, 0],
+          currentAttacker: 0,
+          sunk: [false, false, false, false],
+          winner: -1,
+          started: false,
+        };
         for (const p of room.players) {
           send(p.ws, { type: 'team-start', players: playerList });
         }
@@ -339,7 +370,11 @@ wss.on('connection', (ws) => {
       }
       // Sala com partida em andamento: manda o estado real pra este jogador
       // retomar de onde parou (tabuleiro próprio, turno, energia, upgrades).
-      if (room.game) {
+      // Só se aplica a 1v1/quick-match — o 2v2 tem seu próprio formato de
+      // `game` (times/4 tabuleiros) e ainda não reconstrói a tela ao
+      // reconectar, então nem tenta montar esse payload (evita usar
+      // `otherIdx`/`upgrades` fora do formato 1v1 e travar o processo).
+      if (room.game && !room.maxPlayers) {
         // Tabuleiro do adversário sob o ponto de vista deste jogador: em 1v1
         // só ele mesmo pode ter atirado ali, então todo `shot` marcado no
         // board real do oponente é exatamente o que ele já sabe/revelou.
@@ -612,6 +647,149 @@ wss.on('connection', (ws) => {
         const other = room.players[otherIdx(ws.playerIndex)];
         if (other && other.ws) send(other.ws, { type: 'rematch-opp-ready' });
       }
+      return;
+    }
+
+    // ===== Autoridade de jogo — salas 2v2 (team) =====
+    // Mesmo princípio do bloco 1v1 acima: o servidor guarda os 4 tabuleiros
+    // reais e resolve turno/tiro/energia ele mesmo. Antes, quem decidia
+    // acerto/erro era o próprio cliente do jogador atacado e devolvia o
+    // resultado por relay — um cliente adulterado podia mentir e nunca
+    // perder (bug crítico documentado em docs/PENDENCIAS.md, agora corrigido).
+    // Escolha, posicionamento e placar/turno continuam espelhados no reducer
+    // do cliente (TeamGame.jsx) exatamente como antes; só a fonte da verdade
+    // de "quem acertou o quê" deixou de ser o defensor e passou a ser aqui.
+
+    // Escolha de time: substitui o relay puro por uma mensagem dedicada, só
+    // pra o servidor também saber os times (precisa disso pra validar ataque
+    // e vencedor depois). O cliente continua decidindo sozinho quando os 4
+    // ficaram 2x2 (mesma lógica, agora alimentada por este broadcast).
+    if (msg.type === 'team-pick') {
+      const room = rooms.get(ws.roomCode);
+      const game = room && room.game;
+      if (!room || !room.maxPlayers || !game || game.teamAssignment) return;
+      const team = msg.team === 1 ? 1 : 0;
+      game.teamChoices[ws.playerIndex] = team;
+      for (const p of room.players) {
+        if (p.ws) send(p.ws, { type: 'team-pick-broadcast', playerIndex: ws.playerIndex, team });
+      }
+      const vals = Object.values(game.teamChoices);
+      const allPicked = Object.keys(game.teamChoices).length === 4;
+      const balanced = allPicked
+        && vals.filter((v) => v === 0).length === 2
+        && vals.filter((v) => v === 1).length === 2;
+      if (balanced) game.teamAssignment = { ...game.teamChoices };
+      return;
+    }
+
+    // Tabuleiro: cópia autoritativa guardada no servidor (validada como no
+    // 1v1), além da distribuição visual que o cliente já faz via relay
+    // (tabuleiro completo pro aliado, só "pronto" pros inimigos).
+    if (msg.type === 'team-submit-board') {
+      const room = rooms.get(ws.roomCode);
+      const game = room && room.game;
+      if (!room || !room.maxPlayers || !game || game.started) return;
+      const pIdx = ws.playerIndex;
+      if (!validateBoard(msg.board, SIZE)) return;
+      game.boards[pIdx] = msg.board.map((c) => ({ pieceId: c.pieceId || null, shot: false, revealed: false }));
+      if (game.boards.every(Boolean)) {
+        game.started = true;
+        game.energy[0] += ENERGY_PER_TURN;
+        console.log(`Sala 2v2 ${ws.roomCode}: 4 tabuleiros recebidos, autoridade do servidor ativa`);
+      }
+      return;
+    }
+
+    // Ataque (tiro normal ou plasma): o servidor resolve contra o tabuleiro
+    // real do alvo e decide sozinho o próximo atacante — nunca mais confia
+    // no que o defensor diz sobre o próprio resultado.
+    if (msg.type === 'team-attack') {
+      const room = rooms.get(ws.roomCode);
+      const game = room && room.game;
+      if (!room || !room.maxPlayers || !game || !game.started || game.winner !== -1 || !game.teamAssignment) return;
+      const pIdx = ws.playerIndex;
+      if (pIdx !== game.currentAttacker) return;
+
+      const targetPlayer = Number(msg.targetPlayer);
+      if (!Number.isInteger(targetPlayer) || targetPlayer < 0 || targetPlayer > 3) return;
+      if (teamOfIdx(targetPlayer, game.teamAssignment) === teamOfIdx(pIdx, game.teamAssignment)) return;
+      const defenderBoard = game.boards[targetPlayer];
+      if (!defenderBoard) return;
+
+      const kind = msg.kind === 'plasma' ? 'plasma' : 'normal';
+      const maxCells = kind === 'plasma' ? 5 : 1;
+      const indices = Array.isArray(msg.indices) ? msg.indices.map(Number) : [];
+      if (!indices.length || indices.length > maxCells) return;
+      if (indices.some((i) => !Number.isInteger(i) || i < 0 || i >= SIZE * SIZE || defenderBoard[i].shot)) return;
+
+      const cost = kind === 'plasma' ? PLASMA_COST : 0;
+      if (cost > 0) {
+        if (game.energy[pIdx] < cost) {
+          send(ws, { type: 'error', message: 'Energia insuficiente.' });
+          return;
+        }
+        game.energy[pIdx] -= cost;
+      }
+
+      const { board, hitIndices, destroyed, sunkAll } = resolveShots(defenderBoard, indices);
+      game.boards[targetPlayer] = board;
+      const hit = hitIndices.length > 0;
+      if (sunkAll) game.sunk[targetPlayer] = true;
+
+      game.currentAttacker = nextTeamAttacker(pIdx, hit);
+      if (!hit) game.energy[game.currentAttacker] += ENERGY_PER_TURN;
+
+      const winner = teamWinnerIfAny(game);
+      if (winner !== -1) game.winner = winner;
+
+      const payload = {
+        type: 'team-attack-result',
+        fromPlayer: pIdx,
+        targetPlayer,
+        indices,
+        hitIndices,
+        destroyed,
+        targetSunk: sunkAll,
+      };
+      for (const p of room.players) if (p.ws) send(p.ws, payload);
+      return;
+    }
+
+    // Sondagem de radar: mesma ideia — só o servidor lê o tabuleiro real do alvo.
+    if (msg.type === 'team-probe') {
+      const room = rooms.get(ws.roomCode);
+      const game = room && room.game;
+      if (!room || !room.maxPlayers || !game || !game.started || game.winner !== -1) return;
+      const pIdx = ws.playerIndex;
+      if (pIdx !== game.currentAttacker) return;
+      const targetPlayer = Number(msg.targetPlayer);
+      if (!Number.isInteger(targetPlayer) || targetPlayer < 0 || targetPlayer > 3) return;
+      const defenderBoard = game.boards[targetPlayer];
+      if (!defenderBoard) return;
+      if (game.energy[pIdx] < RADAR_COST) {
+        send(ws, { type: 'error', message: 'Energia insuficiente.' });
+        return;
+      }
+      const cellsIn = Array.isArray(msg.cells) ? msg.cells.map(Number) : [];
+      if (!cellsIn.length || cellsIn.some((i) => !Number.isInteger(i) || i < 0 || i >= SIZE * SIZE)) return;
+      game.energy[pIdx] -= RADAR_COST;
+      const cells = cellsIn.map((i) => ({ index: i, hasPiece: !!defenderBoard[i].pieceId }));
+      send(ws, { type: 'team-probe-result', targetPlayer, cells });
+      return;
+    }
+
+    // Timeout do atacante: validado pelo servidor (era só um relay cego antes)
+    // e transmitido a todos, incluindo quem estourou o tempo.
+    if (msg.type === 'team-timeout') {
+      const room = rooms.get(ws.roomCode);
+      const game = room && room.game;
+      if (!room || !room.maxPlayers || !game || !game.started || game.winner !== -1) return;
+      const pIdx = ws.playerIndex;
+      if (pIdx !== game.currentAttacker) return;
+      game.currentAttacker = nextTeamAttacker(pIdx, false);
+      game.energy[game.currentAttacker] += ENERGY_PER_TURN;
+      const payload = { type: 'team-timeout-result', fromPlayer: pIdx };
+      for (const p of room.players) if (p.ws) send(p.ws, payload);
       return;
     }
 

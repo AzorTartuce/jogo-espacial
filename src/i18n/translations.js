@@ -31,6 +31,14 @@ const pt = {
   'tagline.rescue1': 'A equipe de astronautas do seu rival está perdida no espaço.',
   'tagline.rescue2': 'Encontre todos antes que ele encontre os seus!',
 
+  'landing.cta': 'Iniciar resgate',
+  'landing.hint': 'Grade 8×8 · tempo real · sem cadastro',
+  'landing.signal1': 'Sinal fraco captado... coordenadas incompletas.',
+  'landing.signal2': 'Equipe rival perdida em algum lugar da grade.',
+  'landing.signal3': 'Energia acumulando... poderes especiais em breve.',
+  'landing.signal4': 'Radar pronto. Aguardando ordens.',
+  'landing.signal5': 'Void detectado — tudo pode mudar em 4 segundos.',
+
   'modeMenu.local.title': 'Mesmo computador',
   'modeMenu.local.desc': 'Dois jogadores se revezam no mesmo dispositivo',
   'modeMenu.quick.title': 'Partida rápida',
@@ -325,6 +333,14 @@ const en = {
   'tagline.rescue1': "Your rival's astronaut crew is lost in space.",
   'tagline.rescue2': 'Find them all before they find yours!',
 
+  'landing.cta': 'Start the rescue',
+  'landing.hint': '8×8 grid · real time · no sign-up',
+  'landing.signal1': 'Faint signal received... coordinates incomplete.',
+  'landing.signal2': 'Rival crew lost somewhere on the grid.',
+  'landing.signal3': 'Energy building up... special powers coming online.',
+  'landing.signal4': 'Radar ready. Awaiting orders.',
+  'landing.signal5': 'Void detected — everything can change in 4 seconds.',
+
   'modeMenu.local.title': 'Same device',
   'modeMenu.local.desc': 'Two players take turns on the same device',
   'modeMenu.quick.title': 'Quick match',
@@ -618,6 +634,14 @@ const es = {
 
   'tagline.rescue1': 'El equipo de astronautas de tu rival está perdido en el espacio.',
   'tagline.rescue2': '¡Encuéntralos a todos antes de que él encuentre a los tuyos!',
+
+  'landing.cta': 'Iniciar el rescate',
+  'landing.hint': 'Cuadrícula 8×8 · tiempo real · sin registro',
+  'landing.signal1': 'Señal débil captada... coordenadas incompletas.',
+  'landing.signal2': 'Equipo rival perdido en algún lugar de la cuadrícula.',
+  'landing.signal3': 'Energía acumulándose... poderes especiales en camino.',
+  'landing.signal4': 'Radar listo. Esperando órdenes.',
+  'landing.signal5': 'Void detectado — todo puede cambiar en 4 segundos.',
 
   'modeMenu.local.title': 'Mismo dispositivo',
   'modeMenu.local.desc': 'Dos jugadores se turnan en el mismo dispositivo',

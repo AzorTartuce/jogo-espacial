@@ -85,13 +85,15 @@ export default function TeamBattleScreen({
     setTimeout(() => setShake(false), 400);
   }
 
-  // Envia os tiros ao defensor; o resultado volta em `shotResult`.
-  function sendShot(boardIdx, targetPlayer, indices, prefix) {
+  // Envia os tiros ao servidor (autoridade real do resultado); o resultado
+  // volta em `shotResult`. `kind` diz ao servidor como validar/custar o tiro
+  // (normal: 1 célula; plasma: até 5 em cruz).
+  function sendShot(boardIdx, targetPlayer, indices, prefix, kind = 'normal') {
     if (!indices.length) return;
     setLocked(true);
     setMode('fire');
     pendingRef.current = { kind: 'shot', boardIdx, targetPlayer, indices, prefix: prefix || null };
-    onSendShot(targetPlayer, indices);
+    onSendShot(targetPlayer, indices, kind);
   }
 
   function handleCellClick(boardIdx, index) {
@@ -118,7 +120,7 @@ export default function TeamBattleScreen({
       sfx.plasma();
       setLocalEnergy((e) => e - PLASMA_COST);
       onSpendEnergy(PLASMA_COST);
-      sendShot(boardIdx, targetPlayer, targets, t('battle.plasmaBurst'));
+      sendShot(boardIdx, targetPlayer, targets, t('battle.plasmaBurst'), 'plasma');
       return;
     }
 

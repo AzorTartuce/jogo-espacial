@@ -696,6 +696,181 @@ body::after {
   background: rgba(177, 109, 255, 0.3);
 }
 
+/* ===== Landing (tela inicial imersiva, antes do menu de modos) ===== */
+.landing {
+  min-height: calc(100dvh - 100px);
+  justify-content: center;
+  text-align: center;
+}
+
+.landing-radar {
+  position: relative;
+  width: 200px;
+  height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.landing-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px solid rgba(77, 232, 255, 0.25);
+}
+
+.landing-ring-1 {
+  inset: 0;
+}
+
+.landing-ring-2 {
+  inset: 26px;
+  border-color: rgba(77, 232, 255, 0.35);
+}
+
+.landing-ring-3 {
+  inset: 52px;
+  border-color: rgba(77, 232, 255, 0.45);
+}
+
+.landing-sweep {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, rgba(77, 232, 255, 0.55), transparent 45deg, transparent 360deg);
+  animation: radar-fx-spin 3.6s linear infinite;
+  mix-blend-mode: screen;
+}
+
+.landing-core {
+  position: relative;
+  z-index: 1;
+  font-size: 2.3rem;
+  filter: drop-shadow(0 0 12px rgba(77, 232, 255, 0.6));
+  animation: pulse 2.4s ease-in-out infinite;
+}
+
+.landing-blip {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--pink);
+  box-shadow: 0 0 10px var(--pink);
+  opacity: 0;
+  animation: landing-blip-fade 4.5s ease-in-out infinite;
+}
+
+.landing-blip-1 {
+  top: 20%;
+  left: 68%;
+  animation-delay: 0.3s;
+}
+
+.landing-blip-2 {
+  top: 66%;
+  left: 28%;
+  background: var(--green);
+  box-shadow: 0 0 10px var(--green);
+  animation-delay: 1.8s;
+}
+
+.landing-blip-3 {
+  top: 42%;
+  left: 16%;
+  background: var(--yellow);
+  box-shadow: 0 0 10px var(--yellow);
+  animation-delay: 3.1s;
+}
+
+@keyframes landing-blip-fade {
+  0%,
+  100% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  15%,
+  30% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  45% {
+    opacity: 0;
+  }
+}
+
+.landing-title {
+  font-size: clamp(2rem, 6vw, 3rem);
+  background: linear-gradient(90deg, var(--cyan), var(--purple), var(--pink));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  letter-spacing: 1px;
+}
+
+.landing-signal {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+  min-height: 1.4em;
+  font-family: 'Courier New', monospace;
+  font-size: 0.85rem;
+  letter-spacing: 0.3px;
+  color: var(--green);
+  max-width: 420px;
+}
+
+.landing-signal-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green);
+  flex-shrink: 0;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.landing-cursor {
+  display: inline-block;
+  width: 7px;
+  height: 1em;
+  background: var(--green);
+  animation: landing-cursor-blink 0.9s step-end infinite;
+}
+
+@keyframes landing-cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.landing-cta {
+  margin-top: 6px;
+}
+
+.landing-hint {
+  font-size: 0.75rem;
+  color: #7d86b8;
+  letter-spacing: 0.4px;
+}
+
+.landing-settings-btn {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 2;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-sweep,
+  .landing-core,
+  .landing-blip,
+  .landing-signal-dot,
+  .landing-cursor {
+    animation: none;
+  }
+}
+
 /* ===== Menu ===== */
 .tagline {
   text-align: center;

@@ -4,6 +4,7 @@ import { DEFAULT_MAP_ID, DEFAULT_THEME_ID } from './game/constants.js';
 import LocalGame from './components/LocalGame.jsx';
 import OnlineGame from './components/OnlineGame.jsx';
 import TeamGame from './components/TeamGame.jsx';
+import LandingScreen from './components/LandingScreen.jsx';
 import ModeMenu from './components/ModeMenu.jsx';
 import PlayOptionsMenu from './components/PlayOptionsMenu.jsx';
 import GameModeMenu from './components/GameModeMenu.jsx';
@@ -15,6 +16,7 @@ import HowToPlay from './components/HowToPlay.jsx';
 
 export default function App() {
   const t = useT();
+  const [entered, setEntered] = useState(false); // false até o jogador sair da tela inicial imersiva
   const [mode, setMode] = useState(null);     // null | 'local' | 'online' | 'team'
   const [gameMode, setGameMode] = useState(null); // null | 'classico' | 'ascensao' | 'instabilidade' | 'duelo' | 'void'
   const [mapTheme, setMapTheme] = useState(null); // null | { mapId, themeId, planetId }
@@ -61,38 +63,53 @@ export default function App() {
 
   return (
     <div className="app">
-      <header className="topbar">
-        <h1 className="logo">{t('app.title')}</h1>
-        <div className="topbar-actions">
-          {mode && (
-            <button className="mute-btn" onClick={goToMenu}>
-              {t('nav.menu')}
+      {entered && (
+        <header className="topbar">
+          <h1 className="logo">{t('app.title')}</h1>
+          <div className="topbar-actions">
+            {mode && (
+              <button className="mute-btn" onClick={goToMenu}>
+                {t('nav.menu')}
+              </button>
+            )}
+            <button
+              className="mute-btn"
+              onClick={() => setShowHelp(true)}
+              title={t('help.button')}
+              aria-label={t('help.button')}
+            >
+              ❓
             </button>
-          )}
-          <button
-            className="mute-btn"
-            onClick={() => setShowHelp(true)}
-            title={t('help.button')}
-            aria-label={t('help.button')}
-          >
-            ❓
-          </button>
-          <button
-            className="mute-btn"
-            onClick={() => setShowSettings(true)}
-            title={t('settings.title')}
-            aria-label={t('settings.title')}
-          >
-            ⚙️
-          </button>
-        </div>
-      </header>
+            <button
+              className="mute-btn"
+              onClick={() => setShowSettings(true)}
+              title={t('settings.title')}
+              aria-label={t('settings.title')}
+            >
+              ⚙️
+            </button>
+          </div>
+        </header>
+      )}
+
+      {!entered && (
+        <button
+          className="mute-btn landing-settings-btn"
+          onClick={() => setShowSettings(true)}
+          title={t('settings.title')}
+          aria-label={t('settings.title')}
+        >
+          ⚙️
+        </button>
+      )}
 
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
       {showHelp && <HowToPlay onClose={() => setShowHelp(false)} />}
 
       <ErrorBoundary onReset={goToMenu}>
-        {mode === null && <ModeMenu onSelect={setMode} />}
+        {!entered && <LandingScreen onEnter={() => setEntered(true)} />}
+
+        {entered && mode === null && <ModeMenu onSelect={setMode} />}
 
         {mode === 'local' && gameMode === null && !localCustomizing && (
           <PlayOptionsMenu

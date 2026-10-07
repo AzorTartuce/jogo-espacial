@@ -1,6 +1,6 @@
 import { useReducer, useRef, useEffect, useState, useCallback } from 'react';
 import { ENERGY_PER_TURN } from '../game/constants.js';
-import { resolveShots, emptyBoard } from '../game/logic.js';
+import { emptyBoard } from '../game/logic.js';
 import { sfx, playEventSound } from '../game/sound.js';
 import { createConnection } from '../online/connection.js';
 import { useT, tr } from '../i18n/index.jsx';
@@ -326,21 +326,15 @@ export default function TeamGame({ onExit }) {
   // Refs para os handlers de rede (que rodam fora do fluxo de render).
   const myIndexRef = useRef(state.myIndex);
   const taRef = useRef(state.teamAssignment);
-  const ownBoardRef = useRef(null);
   useEffect(() => { myIndexRef.current = state.myIndex; }, [state.myIndex]);
   useEffect(() => { taRef.current = state.teamAssignment; }, [state.teamAssignment]);
-  useEffect(() => { ownBoardRef.current = state.boards[state.myIndex] || null; }, [state.boards, state.myIndex]);
 
-  // Callbacks estáveis para o TeamBattleScreen enviar tiros/sondagens ao defensor.
-  const sendShot = useCallback((targetPlayer, indices) => connRef.current?.relay({ t: 'attack', targetPlayer, indices }, targetPlayer), []);
-  const sendProbe = useCallback((targetPlayer, cells) => connRef.current?.relay({ t: 'probe', targetPlayer, cells }, targetPlayer), []);
-
-  // Defensor: resolve tiros no próprio tabuleiro e devolve só o resultado.
-  function resolveAttack(indices) {
-    const board = ownBoardRef.current || emptyBoard();
-    const { hitIndices, destroyed, sunkAll } = resolveShots(board, indices);
-    return { hitIndices, destroyed, sunkAll };
-  }
+  // Callbacks estáveis para o TeamBattleScreen enviar tiros/sondagens ao
+  // servidor — que resolve contra o tabuleiro real do alvo (bug crítico
+  // corrigido: antes o ataque ia direto ao cliente defensor, que resolvia
+  // e podia mentir sobre o próprio resultado; ver docs/PENDENCIAS.md).
+  const sendShot = useCallback((targetPlayer, indices, kind) => connRef.current?.send({ type: 'team-attack', targetPlayer, indices, kind }), []);
+  const sendProbe = useCallback((targetPlayer, cells) => connRef.current?.send({ type: 'team-probe', targetPlayer, cells }), []);
 
   useEffect(() => () => { connRef.current?.close(); connRef.current = null; }, []);
 
@@ -391,41 +385,28 @@ export default function TeamGame({ onExit }) {
       if (d.t === 'board')       dispatch({ type: 'board-received', fromPlayer: from, cells: d.cells });
       if (d.t === 'board-ready') dispatch({ type: 'board-received', fromPlayer: from, fog: true });
       if (d.t === 'rematch')     dispatch({ type: 'rematch-vote',   playerIndex: from });
-      if (d.t === 'team-pick')   dispatch({ type: 'pick-team',      playerIndex: d.playerIndex, team: d.team });
       // Instabilidade: recebido por todos exceto quem sorteou o evento.
       if (d.t === 'event')       dispatch({ type: 'event-received', event: d.event, fromPlayer: from });
-
-      // Timeout do atacante: repassado a todos, sem resolução de tabuleiro.
-      if (d.t === 'timeout') {
-        dispatch({ type: 'apply-attack', fromPlayer: from, targetPlayer: -1, indices: [], hitIndices: [] });
-      }
-      // Sou o defensor: resolvo o tiro e transmito o resultado ao restante da sala.
-      if (d.t === 'attack' && d.targetPlayer === myIndexRef.current) {
-        const res = resolveAttack(d.indices);
-        const payload = {
-          t: 'attack-result', fromPlayer: from, targetPlayer: d.targetPlayer,
-          indices: d.indices, hitIndices: res.hitIndices, destroyed: res.destroyed, targetSunk: res.sunkAll,
-        };
-        conn.relay(payload); // aos outros 3
-        dispatch({ type: 'apply-attack', ...payload });
-      }
-      // Sou o defensor de uma sondagem: devolvo só presença/ausência ao atacante.
-      if (d.t === 'probe' && d.targetPlayer === myIndexRef.current) {
-        const board = ownBoardRef.current || emptyBoard();
-        const cells = d.cells.map((i) => ({ index: i, hasPiece: !!board[i].pieceId }));
-        conn.relay({ t: 'probe-result', targetPlayer: d.targetPlayer, cells }, from);
-      }
-      // Resultado de tiro: se fui eu quem atacou, animo no TeamBattleScreen; senão aplico direto.
-      if (d.t === 'attack-result') {
-        if (d.fromPlayer === myIndexRef.current) {
-          dispatch({ type: 'shot-result', targetPlayer: d.targetPlayer, indices: d.indices, hitIndices: d.hitIndices, destroyed: d.destroyed, targetSunk: d.targetSunk });
-        } else {
-          dispatch({ type: 'apply-attack', fromPlayer: d.fromPlayer, targetPlayer: d.targetPlayer, indices: d.indices, hitIndices: d.hitIndices, destroyed: d.destroyed, targetSunk: d.targetSunk });
-        }
-      }
-      // Resultado de sondagem chega só para o atacante.
-      if (d.t === 'probe-result') dispatch({ type: 'probe-result', targetPlayer: d.targetPlayer, cells: d.cells });
     });
+    // Escolha de time: agora o servidor guarda e retransmite (precisa saber
+    // os times pra validar ataque/vencedor depois) — mesmo formato de antes.
+    conn.on('team-pick-broadcast', (m) => dispatch({ type: 'pick-team', playerIndex: m.playerIndex, team: m.team }));
+    // Resultado de ataque resolvido pelo servidor contra o tabuleiro real do
+    // alvo (nunca mais pelo próprio cliente defensor — bug crítico corrigido).
+    // Quem atacou anima no TeamBattleScreen (shotResult); os outros 3
+    // (defensor, aliado do atacante, aliado do defensor) aplicam direto.
+    conn.on('team-attack-result', (m) => {
+      if (m.fromPlayer === myIndexRef.current) {
+        dispatch({ type: 'shot-result', targetPlayer: m.targetPlayer, indices: m.indices, hitIndices: m.hitIndices, destroyed: m.destroyed, targetSunk: m.targetSunk });
+      } else {
+        dispatch({ type: 'apply-attack', fromPlayer: m.fromPlayer, targetPlayer: m.targetPlayer, indices: m.indices, hitIndices: m.hitIndices, destroyed: m.destroyed, targetSunk: m.targetSunk });
+      }
+    });
+    // Resultado de sondagem: só o atacante recebe (mesma regra de antes).
+    conn.on('team-probe-result', (m) => dispatch({ type: 'probe-result', targetPlayer: m.targetPlayer, cells: m.cells }));
+    // Timeout do atacante: validado pelo servidor e transmitido a todos,
+    // inclusive a quem estourou o tempo (substitui o relay cego de antes).
+    conn.on('team-timeout-result', (m) => dispatch({ type: 'apply-attack', fromPlayer: m.fromPlayer, targetPlayer: -1, indices: [], hitIndices: [] }));
     await conn.ready;
     connRef.current = conn;
     return conn;
@@ -446,7 +427,10 @@ export default function TeamGame({ onExit }) {
 
   function pickTeam(team) {
     sfx.click();
-    connRef.current?.relay({ t: 'team-pick', playerIndex: state.myIndex, team });
+    // Vai ao servidor (não mais um relay cego): ele precisa saber os times
+    // pra validar ataque/vencedor depois. Aplicação local otimista abaixo
+    // continua igual — o broadcast de volta é um no-op pro meu próprio pick.
+    connRef.current?.send({ type: 'team-pick', team });
     dispatch({ type: 'pick-team', playerIndex: state.myIndex, team });
   }
 
@@ -456,6 +440,9 @@ export default function TeamGame({ onExit }) {
     const enemies = enemiesOf(state.myIndex, ta);
     connRef.current?.relay({ t: 'board', cells: board.map((c) => c.pieceId) }, ally);
     connRef.current?.relay({ t: 'board-ready' }, enemies);
+    // Cópia autoritativa pro servidor (nunca exibida a mais ninguém) — é
+    // contra ela que o ataque vai ser resolvido de agora em diante.
+    connRef.current?.send({ type: 'team-submit-board', board });
     dispatch({ type: 'placed', board });
   }
 
@@ -464,9 +451,10 @@ export default function TeamGame({ onExit }) {
     dispatch({ type: 'apply-attack', fromPlayer: state.myIndex, targetPlayer, indices, hitIndices, destroyed, targetSunk });
   }
 
+  // O servidor valida e transmite o timeout a todos (inclusive a mim); não
+  // aplica mais localmente aqui pra não aplicar duas vezes.
   function handleTimeout() {
-    connRef.current?.relay({ t: 'timeout' });
-    dispatch({ type: 'apply-attack', fromPlayer: state.myIndex, targetPlayer: -1, indices: [], hitIndices: [] });
+    connRef.current?.send({ type: 'team-timeout' });
   }
 
   function requestRematch() {
